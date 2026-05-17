@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:intl/intl.dart';
+import '../Notifications/notifications.dart';
 import '../model/Message.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -46,6 +47,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void initState() {
     super.initState();
     _markMessagesAsRead();
+    _scrollToBottom();
+
+    // 1️⃣ إخبار خدمة الإشعارات أن هذه المحادثة مفتوحة الآن
+    NotificationService.currentOpenChatId = widget.chat.id;
 
     // مراقبة الاتصال بشكل حي
     connectionSubscription = InternetConnection().onStatusChange.listen((status) {
@@ -75,6 +80,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     _messageController.dispose();
     _scrollController.dispose();
     connectionSubscription?.cancel(); // ← أضف هذا السطر
+
+    // 2️⃣ تصفية المتغير عند خروج المستخدم من الشاشة لتعود الإشعارات للعمل بشكل طبيعي
+    if (NotificationService.currentOpenChatId == widget.chat.id) {
+      NotificationService.currentOpenChatId = null;
+    }
+
     super.dispose();
   }
 
@@ -115,13 +126,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           _scrollController.position.maxScrollExtent > 0) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
+          duration: const Duration(milliseconds: 500),
           curve: Curves.easeOut,
         );
       }
     });
   }
   Future<void> _sendMessage() async {
+    // 1️⃣ حماية من الإرسال المتكرر مرتين عند الضغط السريع
+    if (_isSending) return;
+
     final text = _messageController.text.trim();
     final currentUser = ref.read(appUserDataProvider);
 
@@ -169,6 +183,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       return;
     }
 
+    setState(() {
+      _isSending = true; // تفعيل حالة الإرسال لمنع التكرار
+    });
+
     // إنشاء معرف مؤقت
     final tempMessageId = DateTime.now().millisecondsSinceEpoch.toString();
 
@@ -182,6 +200,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       isRead: false,
       isDeleted: false,
       isSynced: isConnected, // استخدام حالة الاتصال الحالية
+
     );
 
     // تنظيف المدخلات والتمرير
@@ -189,10 +208,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     _scrollToBottom();
 
     // ⚠️ لا نستخدم await هنا لكي لا ننتظر الرد
-    ref.read(messageServiceProvider).sendMassege(message).catchError((e) {
-      print("❌ فشل إرسال الرسالة: $e");
-      // يمكنك هنا تحديث حالة الرسالة إلى "فشل الإرسال" إذا أردت
-    });
+    // 1️⃣ إرسال الرسالة إلى قاعدة بيانات Firebase
+    try {
+      // إرسال الرسالة لقاعدة البيانات
+      await ref.read(messageServiceProvider).sendMassege(message);
+
+      // 2️⃣ إرسال الإشعار فقط للمستحق (وتأكيد استخدام displayName الصحيح للموديل)
+      final senderDisplayName = currentUser.displayName ?? currentUser.email.split('@').first;
+
+      await NotificationService().sendMessageNotification(
+        targetEmail: widget.receiverEmail.trim().toLowerCase(),
+        senderName: senderDisplayName,
+        messageBody: text,
+        chatId: widget.chat.id,
+        messageId: tempMessageId,
+      );
+    } catch (e) {
+      print("❌ فشل إرسال الرسالة أو الإشعار: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSending = false; // إعادة فتح إمكانية الإرسال مجدداً للرسالة التالية
+        });
+      }
+    }
   }
 
 
@@ -1134,7 +1173,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('حذف'),
+            child: const Text('حذف',style: TextStyle(color: Colors.white),),
           ),
         ],
       ),
@@ -1265,6 +1304,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
+
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withOpacity(0.1),

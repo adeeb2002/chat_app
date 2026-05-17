@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:ChatApp/Combonant/CustomSearchBar.dart';
 import 'package:ChatApp/Provider/chatProvider.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:ChatApp/Screen/addChatScreen.dart';
@@ -23,8 +24,11 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with AutomaticKeepAliveClientMixin {
   bool _isLoading = true;
-  bool isConnected=false;
+  bool isConnected = false;
+  final searchController = TextEditingController();
   StreamSubscription? connectionSubscription;
+
+  String _searchQuery = '';
 
   @override
   bool get wantKeepAlive => true;
@@ -35,8 +39,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // ✅ الطريقة الصحيحة لاستدعاء الدوال المستقلة
     _checkUserLoggedIn();
 
+    // 2️⃣ الاستماع للتغييرات في حقل البحث وتحديث الواجهة فوراً
+    searchController.addListener(() {
+      setState(() {
+        _searchQuery = searchController.text.trim().toLowerCase();
+      });
+    });
+
     // مراقبة الاتصال بشكل حي
-    connectionSubscription = InternetConnection().onStatusChange.listen((status) {
+    connectionSubscription = InternetConnection().onStatusChange.listen((
+      status,
+    ) {
       final hasConnection = status == InternetStatus.connected;
 
       // تحديث الحالة فقط إذا تغيرت لتجنب Rebuild غير ضروري
@@ -54,12 +67,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         }
       }
     });
-
   }
 
   @override
   void dispose() {
     connectionSubscription?.cancel();
+    searchController.dispose();
     super.dispose();
   }
 
@@ -78,7 +91,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         final localUser = AppUser(
           id: userId,
           email: userEmail,
-          name: userName ?? userEmail.split('@')[0],
+          displayName: userName ?? userEmail.split('@')[0],
           isOnline: false, // افتراضياً أوفلاين
         );
 
@@ -228,11 +241,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 fontWeight: FontWeight.bold,
               ),
             ),
+            const SizedBox(width: 10), // مسافة صغيرة تفصل العنوان عن الحالة
             Text(
               isConnected ? 'متصل' : 'في انتظار الشبكة...',
               style: TextStyle(
-                  fontSize: 10,
-                  color: isConnected ? Colors.greenAccent : Colors.orangeAccent
+                fontSize: 11,
+                color: isConnected ? Colors.greenAccent : Colors.orangeAccent,
               ),
             ),
           ],
@@ -241,10 +255,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: _showSearchDialog,
-          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             color: Colors.white,
@@ -272,7 +282,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   children: [
                     Icon(Icons.logout, size: 20, color: Colors.red),
                     SizedBox(width: 12),
-                    Text('تسجيل الخروج'),
+                    Text(
+                      'تسجيل الخروج',
+                      style: TextStyle(color: Colors.red),
+                    ), // تعديل لون النص ليناسب اللوجو الأحمر
                   ],
                 ),
               ),
@@ -280,47 +293,125 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ),
         ],
       ),
-      body:Stack( // ✅ استخدام Stack لإظهار تنبيه عند انقطاع الإنترنت
+      body: Stack(
+        // الـ Stack هنا فقط للتحكم في شريط الإشعارات العلوي الطائر
         children: [
-          RefreshIndicator(
-            onRefresh: () async {
-              ref.invalidate(chatsProvider(currentUserEmail));
-            },
-            child: chatsAsync.when(
-              data: (chats) {
-                if (chats.isEmpty) return _buildEmptyState(currentUser!);
-                return ListView.builder(
-                  itemCount: chats.length,
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  itemBuilder: (context, index) {
-                    final chat = chats[index];
-                    final otherEmail = chat.getOtherParticipant(currentUserEmail);
-                    return _buildChatItem(chat, otherEmail, currentUserEmail);
+          // المحتوى الأساسي مرتب عمودياً بشكل سليم
+          Column(
+            children: [
+              // 1️⃣ حقل البحث مع هوامش مناسبة
+              Padding(
+                padding: const EdgeInsets.only(
+                  top: 12,
+                  left: 12,
+                  right: 12,
+                  bottom: 8,
+                ),
+                child: CustomSearchBar(
+                  controller: searchController,
+                  onClear: () {
+                    setState(() {
+                      _searchQuery = '';
+                    });
                   },
-                );
-              },
-              loading: () => isConnected
-                  ? const Center(child: CircularProgressIndicator())
-                  : const Center(child: Text("لا يوجد اتصال، جاري محاولة جلب البيانات محلياً...")),
-              // ✅ في حالة الخطأ أوفلاين، Firebase سيعيد البيانات من الكاش،
-              // ولكن إذا حدث خطأ حقيقي نظهره هنا
-              error: (error, stackTrace) => _buildErrorState(error.toString()),
-            ),
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value.trim().toLowerCase();
+                    });
+                  },
+                ),
+              ),
+
+              // 2️⃣ قائمة المحادثات مرنة تأخذ باقي مساحة الشاشة عمودياً
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () async {
+                    ref.invalidate(chatsProvider(currentUserEmail));
+                  },
+                  child: chatsAsync.when(
+                    data: (chats) {
+                      if (chats.isEmpty) return _buildEmptyState(currentUser);
+
+                      // 3️⃣ تصفية القائمة برمجياً بناءً على نص البحث
+                      final filteredChats = chats.where((chat) {
+                        final otherEmail = chat.getOtherParticipant(
+                          currentUserEmail,
+                        );
+
+                        // جلب بيانات المستخدم الآخر من الـ Provider (الاسم المقترن به)
+                        final otherUser = ref
+                            .read(userDataProvider(otherEmail))
+                            .value;
+                        final otherName =
+                            otherUser?.displayName?.toLowerCase() ??
+                            otherEmail.split('@')[0].toLowerCase();
+
+                        // التحقق مما إذا كان الاسم أو الإيميل يحتوي على نص البحث
+                        return otherName.contains(_searchQuery) ||
+                            otherEmail.toLowerCase().contains(_searchQuery);
+                      }).toList();
+
+                      // إذا كانت نتائج البحث فارغة نوضح ذلك للمستخدم
+                      if (filteredChats.isEmpty && _searchQuery.isNotEmpty) {
+                        return const Center(
+                          child: Text(
+                            'لا توجد نتائج مطابقة لبحثك',
+                            style: TextStyle(color: Colors.grey, fontSize: 16),
+                          ),
+                        );
+                      }
+
+                      // عرض القائمة المصفاة فقط
+                      return ListView.builder(
+                        itemCount: filteredChats.length,
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        itemBuilder: (context, index) {
+                          final chat = filteredChats[index];
+                          final otherEmail = chat.getOtherParticipant(
+                            currentUserEmail,
+                          );
+                          return _buildChatItem(
+                            chat,
+                            otherEmail,
+                            currentUserEmail,
+                          );
+                        },
+                      );
+                    },
+                    loading: () => isConnected
+                        ? const Center(child: CircularProgressIndicator())
+                        : const Center(
+                            child: Text(
+                              "لا يوجد اتصال، جاري محاولة جلب البيانات محلياً...",
+                            ),
+                          ),
+                    error: (error, stackTrace) =>
+                        _buildErrorState(error.toString()),
+                  ),
+                ),
+              ),
+            ],
           ),
 
-          // ✅ شريط نحيف يظهر عند انقطاع الإنترنت
+          // 3️⃣ شريط نحيف يعلو كل شيء ويختفي عند توفر الإنترنت دون حجز مساحة من الـ Column
           if (!isConnected)
             Positioned(
               top: 0,
               left: 0,
               right: 0,
               child: Container(
-                color: Colors.black87,
-                padding: const EdgeInsets.symmetric(vertical: 4),
+                color: Colors.redAccent.withOpacity(
+                  0.9,
+                ), // تم تغيير اللون للأحمر الهادئ ليعطي انطباع التحذير
+                padding: const EdgeInsets.symmetric(vertical: 6),
                 child: const Text(
-                  'لا يوجد اتصال بالإنترنت - يتم العرض من الكاش',
+                  'أنت تعمل حالياً في وضع الأوفلاين (يتم العرض من الكاش)',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white, fontSize: 12),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ),
@@ -332,7 +423,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             context,
             MaterialPageRoute(builder: (context) => const AddChatScreen()),
           );
-        }, // ✅ استخدام الدالة المصححة
+        },
         backgroundColor: const Color(0xFF075E54),
         child: const Icon(Icons.chat, color: Colors.white),
       ),
@@ -367,6 +458,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required String? imageUrl,
     required String currentUserEmail,
   }) {
+    // 1️⃣ جلب عدد الرسائل غير المقروءة من الـ chat model
+    // تأكد من مطابقة اسم المتغير لديك، سأفترض اسمه unreadCount أو نقوم بمثال افتراضي
+    final int unreadCount = chat.unreadCount ?? 0;
+    final bool hasUnread = unreadCount > 0;
+
     return Dismissible(
       key: Key(chat.id),
       direction: DismissDirection.endToStart,
@@ -401,22 +497,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           final currentUser = ref.read(appUserDataProvider);
           final currentUserId = currentUser?.id ?? currentUserEmail;
 
-          print('home: delete chat $chat.id $currentUserId');
           await chatService.deleteChatForUser(chat.id, currentUserId);
 
-          // ✅ تحديث القائمة فوراً
           if (mounted) {
             ref.invalidate(chatsProvider(currentUserEmail));
-
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(const SnackBar(content: Text('تم حذف المحادثة')));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('تم حذف المحادثة')),
+            );
           }
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('خطأ في الحذف: $e')));
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('خطأ في الحذف: $e')),
+            );
             ref.invalidate(chatsProvider(currentUserEmail));
           }
         }
@@ -434,29 +527,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               backgroundColor: Colors.green[50],
               child: imageUrl != null && imageUrl.isNotEmpty
                   ? ClipOval(
-                      child: Image.network(
-                        imageUrl,
-                        width: 50,
-                        height: 50,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Text(
-                          name[0].toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green,
-                          ),
-                        ),
-                      ),
-                    )
-                  : Text(
-                      name[0].toUpperCase(),
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green,
-                      ),
+                child: Image.network(
+                  imageUrl,
+                  width: 50,
+                  height: 50,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Text(
+                    name[0].toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green,
                     ),
+                  ),
+                ),
+              )
+                  : Text(
+                name[0].toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green,
+                ),
+              ),
             ),
             title: Text(
               name,
@@ -470,15 +563,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   : 'ابدأ المحادثة',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: Colors.grey[600]),
+              // جعل لون آخر رسالة أغمق قليلاً إذا كانت غير مقروءة
+              style: TextStyle(
+                color: hasUnread ? Colors.black87 : Colors.grey[600],
+                fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
+              ),
             ),
-            trailing: Text(
-              _formatTime(chat.lastMessageTime),
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            // 2️⃣ التعديل الجوهري هنا: ترتيب الوقت والعداد عمودياً
+            trailing: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                // الوقت في الأعلى
+                Text(
+                  _formatTime(chat.lastMessageTime),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: hasUnread ? const Color(0xFF075E54) : Colors.grey,
+                    fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+                const SizedBox(height: 5), // مسافة بسيطة بين الوقت والعداد
+
+                // العداد الدائري يظهر فقط إذا كان هناك رسائل غير مقروءة
+                if (hasUnread)
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF075E54), // اللون الأخضر الخاص بالواتساب
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 20,
+                      minHeight: 20,
+                    ),
+                    child: Text(
+                      '$unreadCount',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+              ],
             ),
             onTap: () {
-              print(chat.isBlocked ?? false);
-              print('is');
               Navigator.push(
                 context,
                 MaterialPageRoute(

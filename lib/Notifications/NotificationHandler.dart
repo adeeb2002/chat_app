@@ -1,5 +1,6 @@
 // lib/services/notifications/notification_handler.dart
 
+import 'package:ChatApp/Screen/chatScreen.dart';
 import 'package:flutter/material.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import '../model/NotificationType.dart';
@@ -19,7 +20,7 @@ class NotificationHandler {
     OneSignal.Notifications.addClickListener(_handleNotificationClick);
 
     // الاستماع للإشعارات الواردة (التطبيق مفتوح)
-    OneSignal.Notifications.addForegroundWillDisplayListener(_handleForegroundNotification);
+    //OneSignal.Notifications.addForegroundWillDisplayListener(_handleForegroundNotification);
 
     print('✅ تم تهيئة معالج الإشعارات');
   }
@@ -48,7 +49,7 @@ class NotificationHandler {
       final payload = NotificationPayload.fromOSNotification(additionalData);
 
       // عرض الإشعار داخل التطبيق (اختياري)
-      _showInAppNotification(payload);
+      //_showInAppNotification(payload);
 
       // السماح بعرض الإشعار الأصلي
       event.notification.display();
@@ -97,6 +98,7 @@ class NotificationHandler {
     print('💬 فتح المحادثة: $chatId');
     // استبدل بالمسار الصحيح لصفحة المحادثة
     Navigator.of(context).pushNamed('/chat', arguments: {'chatId': chatId});
+   // Navigator.push(context, MaterialPageRoute(builder: (context) => ChatScreen(chat: chat, receiverEmail: receiverEmail)))
   }
 
   /// فتح صفحة طلبات الصداقة
@@ -118,7 +120,7 @@ class NotificationHandler {
   }
 
   /// عرض إشعار داخل التطبيق (Banner أو SnackBar)
-  void _showInAppNotification(NotificationPayload payload) {
+ /* void _showInAppNotification(NotificationPayload payload) {
     final context = navigatorKey.currentContext;
     if (context == null) return;
 
@@ -143,5 +145,5 @@ class NotificationHandler {
         ),
       ),
     );
-  }
+  }*/
 }

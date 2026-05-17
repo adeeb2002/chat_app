@@ -6,6 +6,7 @@ class Chat {
   final String lastMessageSender;
   final int createdAt;
   final int updatedAt;
+  final int? unreadCount;
   bool isDeletedChatForYou = false;
   final Map<String, dynamic>? deletedFor;
   final Map<String, dynamic>? clearedFor;
@@ -26,7 +27,7 @@ class Chat {
     this.clearedFor,
     this.isBlocked,
     this.blockedBy,
-
+    this.unreadCount
   });
 
   Map<String, dynamic> toMap() {
@@ -41,6 +42,7 @@ class Chat {
       'deletedFor': deletedFor,
       'isBlocked': isBlocked,
       'blockedBy': blockedBy,
+      'isOpen' : unreadCount
     };
   }
 
@@ -62,6 +64,7 @@ class Chat {
           : null,
       isBlocked: map['isBlocked'] ?? false,
       blockedBy: map['blockedBy'] ?? '',
+        unreadCount: map['unreadCount'] ?? 0
     );
   }
 

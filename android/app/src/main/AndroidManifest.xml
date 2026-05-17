@@ -9,6 +9,18 @@
         android:label="chat_app"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+
+        <!-- قنوات الإشعارات -->
+        <meta-data
+            android:name="com.onesignal.NotificationChannelId"
+            android:value="chat_messages" />
+        <meta-data
+            android:name="com.onesignal.NotificationChannelName"
+            android:value="رسائل المحادثة" />
+        <meta-data
+            android:name="com.onesignal.NotificationChannelDescription"
+            android:value="إشعارات رسائل المحادثات الجديدة" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

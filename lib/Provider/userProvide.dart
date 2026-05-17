@@ -66,6 +66,8 @@ class AuthService {
           .equalTo(email)
           .get();
 
+      print('snapshot date : $snapshot.value');
+
       if (snapshot.exists) {
         final data = snapshot.value as Map<dynamic, dynamic>;
         if (data.isNotEmpty) {
@@ -73,11 +75,13 @@ class AuthService {
           final userId = entry.key.toString();
           final userData = Map<String, dynamic>.from(entry.value);
 
+          print(userData['email'] + userData['password']);
+
           if (userData['password'] == password) {
             final user = AppUser(
               id: userId,
               email: email,
-              name: userData['name'] ?? email.split('@')[0],
+              displayName: userData['displayName'] ?? email.split('@')[0],
               imageUrl: userData['imageUrl'],
               isOnline: true,
               lastSeen: DateTime.now().millisecondsSinceEpoch,
@@ -99,7 +103,7 @@ class AuthService {
           }
         }
       }
-
+      print('email $email');
       return await register(email, password, context);
     } catch (e) {
       print('❌ خطأ في تسجيل الدخول: $e');
@@ -108,15 +112,20 @@ class AuthService {
   }
 
   // ✅ في دالة التسجيل:
-  Future<AppUser?> register(
+  Future<AppUser?> register (
     String email,
     String password,
     BuildContext context,
   ) async {
     try {
-      final existingUser = await getUserByEmail(email);
-      if (existingUser != null) {
-        throw Exception('البريد الإلكتروني مسجل مسبقاً');
+      //final existingUser = await getUserByEmail(email);
+
+      final response=await FirebaseDatabase.instance.ref('users').orderByChild('email').equalTo(email).get();
+
+      if(response.exists){
+        print('الايميل موجود من قبل وتم التسجيل الدخول به ');
+        login(email, password, context);
+        return null;
       }
 
       final newUserRef = db.ref('users').push();
@@ -125,7 +134,7 @@ class AuthService {
       final newUser = AppUser(
         id: newUserRef.key,
         email: email,
-        name: name,
+        displayName: name,
         isOnline: true,
         lastSeen: DateTime.now().millisecondsSinceEpoch,
         password: password,
@@ -367,7 +376,7 @@ final cachedUserProvider = FutureProvider<AppUser?>((ref) async {
     return AppUser(
       id: userId,
       email: userEmail,
-      name: userName ?? userEmail.split('@')[0],
+      displayName: userName ?? userEmail.split('@')[0],
       isOnline: true,
       lastSeen: DateTime.now().millisecondsSinceEpoch,
     );

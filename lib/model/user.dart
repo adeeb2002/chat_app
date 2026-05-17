@@ -2,7 +2,7 @@
 class AppUser {
   final String? id;
   final String email;
-  final String name;
+  final String displayName;
   final String? imageUrl;
   final bool isOnline;
   final int lastSeen;
@@ -11,7 +11,7 @@ class AppUser {
   AppUser({
     this.id,
     required this.email,
-    required this.name,
+    required this.displayName,
     this.imageUrl,
     this.isOnline = false,
     this.lastSeen = 0,
@@ -21,10 +21,11 @@ class AppUser {
   Map<String, dynamic> toMap() {
     return {
       'email': email,
-      'name': name,
+      'displayName': displayName,
       'imageUrl': imageUrl,
       'isOnline': isOnline,
       'lastSeen': lastSeen,
+      'password': password
     };
   }
 
@@ -32,12 +33,13 @@ class AppUser {
     return AppUser(
       id: id,
       email: map['email'] ?? '',
-      name: map['name'] ?? '',
+      displayName: map['displayName'] ?? '',
       imageUrl: map['imageUrl'],
       isOnline: map['isOnline'] ?? false,
       lastSeen: map['lastSeen'] ?? 0,
+      password: map['password'] ?? ''
     );
   }
 
-  String get displayName => name.isNotEmpty ? name : email.split('@')[0];
+  String get name => displayName.isNotEmpty ? displayName : email.split('@')[0];
 }

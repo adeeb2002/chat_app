@@ -23,7 +23,7 @@ final messagesProvider = StreamProvider.family<List<Message>, String>((ref, chat
   final db = ref.watch(firebaseDatabaseProvider);
   final currentUserEmail = ref.watch(currentUserEmailProvider);
 
-  return db.ref('chats').child(chatId).child('messages').limitToLast(50).onValue.map((event) {
+  return db.ref('chats').child(chatId).child('messages').limitToLast(40).onValue.map((event) {
     final data = event.snapshot.value as Map<dynamic, dynamic>? ?? {};
 
     final messages = data.entries.map((entry) {
@@ -120,7 +120,7 @@ class MessageService {
           print('🎯 المستلم: ${massege.resevUser}');
           print('👤 المرسل: $senderName');
 
-          final success = await NotificationService().sendMessageNotification(
+          /*final success = await NotificationService().sendMessageNotification(
             targetEmail: massege.resevUser,
             senderName: senderName,
             messageBody: massege.body,
@@ -128,12 +128,17 @@ class MessageService {
             messageId: messageId,
           );
 
+
+          print('success $success');
+
           if (success) {
             print('✅✅✅ تم إرسال الإشعار بنجاح ✅✅✅');
           } else {
             print('⚠️ فشل إرسال الإشعار، إضافة للقائمة...');
             await _addToPendingQueue(massege, messageId);
           }
+          */
+
         } catch (e) {
           print('❌ خطأ في إرسال الإشعار: $e');
           print('📝 إضافة الإشعار إلى قائمة الانتظار...');

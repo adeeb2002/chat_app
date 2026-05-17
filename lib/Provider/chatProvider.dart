@@ -3,14 +3,20 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import '../model/chat.dart';
 import '../model/Message.dart';
 
+
+var unreadCount=0;
 // Provider لقاعدة البيانات
 final firebaseDatabaseProvider = Provider<FirebaseDatabase>((ref) {
   return FirebaseDatabase.instance;
 });
+final unreadCountMessages=StateProvider<int>((ref) {
+  return unreadCount;
+},);
 
 // Provider لخدمة المحادثات
 final chatServiceProvider = Provider<ChatService>((ref) {
@@ -55,13 +61,21 @@ final chatsProvider = StreamProvider.family<List<Chat>, String>((ref, userEmail)
     final data = event.snapshot.value as Map<dynamic, dynamic>? ?? {};
     final List<Chat> chats = [];
 
+
     data.forEach((chatId, chatData) {
       final chatMap = Map<String, dynamic>.from(chatData);
       final participants = List<String>.from(chatMap['participants'] ?? []);
       final deletedFor = Map<String, dynamic>.from(chatMap['deletedFor'] ?? {});
 
+
       // التحقق من أن المستخدم جزء من المحادثة ولم يحذفها
       if (participants.contains(userEmail) && !deletedFor.containsKey(userEmail)) {
+        final messages=List<Chat>.from(chatMap['message'] ?? []);
+        for(int i =0;i<messages.length;i++){
+          if(!chatMap['isRead']){
+            ref.read(unreadCountMessages.notifier).state++;
+          }
+        }
         chats.add(Chat(
           id: chatId.toString(),
           participants: participants,
@@ -74,6 +88,7 @@ final chatsProvider = StreamProvider.family<List<Chat>, String>((ref, userEmail)
           lastMessageSender: chatMap['lastMessageSender'],
           createdAt: chatMap['createdAt'],
           isDeletedChatForYou: false,
+          unreadCount: chatMap['unreadCount'] ?? 0
         ));
       }
     });
@@ -160,7 +175,8 @@ class ChatService {
         'clearedFor': {},
         'isBlocked': false,
         'blockedBy': null,
-        'isSynced' : isConnected
+        'isSynced' : isConnected,
+        'unreadCount' : 0
       });
 
       print('✅ تم إنشاء المحادثة بنجاح: $chatId');
@@ -172,7 +188,8 @@ class ChatService {
           resevUser: user2Email,
           body: initialMessage,
           chatId: chatId,
-          isSynced: isConnected
+          isSynced: isConnected,
+
         );
         await messageService.sendMessage(message);
       }

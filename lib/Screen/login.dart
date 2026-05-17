@@ -95,23 +95,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
-  Future<void> _handleRegister(String name, String email, String password) async {
+  Future<void> _handleRegister(String displayName, String email, String password) async {
     setState(() => _isLoading = true);
     try {
       final authService = ref.read(authServiceProvider);
       final user = await authService.register(email, password, context);
 
       if (user != null && mounted) {
-        if (name.isNotEmpty) {
+        if (displayName.isNotEmpty) {
           await FirebaseDatabase.instance
               .ref('users')
               .child(user.id!)
-              .update({'name': name.trim()});
+              .update({'name': displayName.trim()});
 
           final updatedUser = AppUser(
             id: user.id,
             email: user.email,
-            name: name.trim(),
+            displayName: displayName.trim(),
             isOnline: true,
             lastSeen: DateTime.now().millisecondsSinceEpoch,
           );

@@ -101,7 +101,6 @@ class _MyAppState extends ConsumerState<MyApp> {
         }
       }
 
-      print(isLoggedIn);
 
       if (isLoggedIn) {
         final prefs = await SharedPreferences.getInstance();
