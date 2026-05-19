@@ -5,6 +5,7 @@ import 'package:ChatApp/Provider/messageProvder.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:ChatApp/model/chat.dart';
 import 'package:ChatApp/model/user.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
@@ -14,13 +15,13 @@ import '../model/Message.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final Chat chat;
-  final String receiverEmail;
+  final String receiverPhone;
   final String? receiverName;
 
   const ChatScreen({
     super.key,
     required this.chat,
-    required this.receiverEmail,
+    required this.receiverPhone,
     this.receiverName,
   });
 
@@ -39,6 +40,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   // ✅ متغيرات لتتبع حالة الحظر الفعلية
   bool _isBlocked = false;
   String? _blockedBy;
+
+
 
   @override
   bool get wantKeepAlive => true;
@@ -64,9 +67,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
         if (isConnected) {
           // إذا عاد الإنترنت، نحدث البيانات
-          final currentUserEmail = ref.read(appUserEmailProvider);
-          if (currentUserEmail != null) {
-            ref.invalidate(chatsProvider(currentUserEmail));
+          final currentUserPhone = ref.read(appUserPhoneProvider);
+          if (currentUserPhone != null) {
+            ref.invalidate(chatsProvider(currentUserPhone));
           }
         }
       }
@@ -109,11 +112,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   Future<void> _markMessagesAsRead() async {
     final currentUser = ref.read(appUserDataProvider);
-    if (currentUser != null && currentUser.email.isNotEmpty) {
+    if (currentUser != null && currentUser.phone.isNotEmpty) {
       try {
         await ref
             .read(messageServiceProvider)
-            .markMessagesAsRead(widget.chat.id, currentUser.email);
+            .markMessagesAsRead(widget.chat.id, currentUser.phone);
       } catch (e) {
         print('❌ خطأ في تحديث حالة القراءة: $e');
       }
@@ -139,8 +142,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final text = _messageController.text.trim();
     final currentUser = ref.read(appUserDataProvider);
 
-    // التحققات الأساسية (تبقى كما هي)
-    final isUserBlocked = _isBlocked && _blockedBy == currentUser?.email;
+    // التحققات الأساسية
+    final isUserBlocked = _isBlocked && _blockedBy == currentUser?.phone;
     if (isUserBlocked) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -163,7 +166,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       return;
     }
 
-    if (currentUser == null || currentUser.email.isEmpty) {
+    if (currentUser == null || currentUser.phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('خطأ: المستخدم غير مسجل الدخول'),
@@ -173,7 +176,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       return;
     }
 
-    if (widget.receiverEmail.isEmpty) {
+    if (widget.receiverPhone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('خطأ: بيانات المستلم غير صحيحة'),
@@ -187,42 +190,42 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       _isSending = true; // تفعيل حالة الإرسال لمنع التكرار
     });
 
-    // إنشاء معرف مؤقت
+    // إنشاء معرف مؤقت للرسالة
     final tempMessageId = DateTime.now().millisecondsSinceEpoch.toString();
+
+    // 🌟 تم نقل منطق إعادة الإحياء ليعمل بأمان باستخدام ref.read 🌟
+    try {
+      final chatService = ref.read(chatServiceProvider);
+      final isDelete = await chatService.isChatDeletedForUser(widget.chat.id, currentUser.phone);
+
+      if (isDelete) {
+        await chatService.restoreDeletedChat(widget.chat.id, currentUser.phone);
+      }
+    } catch (e) {
+      print("⚠️ فشل التحقق من حالة حذف المحادثة محلياً: $e");
+    }
 
     final message = Message(
       id: tempMessageId,
-      senderUser: currentUser.email,
-      resevUser: widget.receiverEmail,
+      senderUser: currentUser.phone,
+      resevUser: widget.receiverPhone,
       body: text,
       chatId: widget.chat.id,
       timestamp: DateTime.now().millisecondsSinceEpoch,
       isRead: false,
       isDeleted: false,
       isSynced: isConnected, // استخدام حالة الاتصال الحالية
-
     );
 
-    // تنظيف المدخلات والتمرير
+    // تنظيف المدخلات والتمرير لأسفل الواجهة فوراً
     _messageController.clear();
     _scrollToBottom();
 
-    // ⚠️ لا نستخدم await هنا لكي لا ننتظر الرد
-    // 1️⃣ إرسال الرسالة إلى قاعدة بيانات Firebase
     try {
-      // إرسال الرسالة لقاعدة البيانات
-      await ref.read(messageServiceProvider).sendMassege(message);
+      // 🚀 إرسال الرسالة لقاعدة البيانات
+      // (تأكد أن دالة sendMessage تقوم برفع الـ visibility للطرفين كما رتبناها سابقاً)
+      await ref.read(messageServiceProvider).sendMessage(message, tempMessageId);
 
-      // 2️⃣ إرسال الإشعار فقط للمستحق (وتأكيد استخدام displayName الصحيح للموديل)
-      final senderDisplayName = currentUser.displayName ?? currentUser.email.split('@').first;
-
-      await NotificationService().sendMessageNotification(
-        targetEmail: widget.receiverEmail.trim().toLowerCase(),
-        senderName: senderDisplayName,
-        messageBody: text,
-        chatId: widget.chat.id,
-        messageId: tempMessageId,
-      );
     } catch (e) {
       print("❌ فشل إرسال الرسالة أو الإشعار: $e");
     } finally {
@@ -266,7 +269,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
     final messagesAsync = ref.watch(messagesProvider(widget.chat.id));
     final currentUser = ref.watch(appUserDataProvider);
-    final receiverData = ref.watch(userDataProvider(widget.receiverEmail));
+    final receiverData = ref.watch(userDataProvider(widget.receiverPhone));
 
     // ✅ مراقبة حالة الحظر من داخل build
     final blockStatus = ref.watch(chatBlockStatusProvider(widget.chat.id));
@@ -291,10 +294,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     });
 
     final receiverName =
-        widget.receiverName ?? (widget.receiverEmail.split('@').first);
+        widget.receiverName ?? (widget.receiverPhone);
 
     // ✅ التحقق من الحظر باستخدام المتغيرات المحدثة
-    final isUserBlocked = _isBlocked && _blockedBy == currentUser?.email;
+    final isUserBlocked = _isBlocked && _blockedBy == currentUser?.phone;
 
     return Scaffold(
       backgroundColor: const Color(0xFFECE5DD),
@@ -338,7 +341,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     final message = messages[index];
                     final isMe =
                         currentUser != null &&
-                        message.senderUser == currentUser.email;
+                        message.senderUser == currentUser.phone;
 
                     final isSameSenderAsPrevious =
                         index > 0 &&
@@ -393,34 +396,38 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               data: (user) {
                 final name = user?.displayName ?? receiverName;
                 final imageUrl = user?.imageUrl;
-                return CircleAvatar(
-                  radius: 20,
-                  backgroundColor: Colors.green[50],
-                  child: imageUrl != null && imageUrl.isNotEmpty
-                      ? ClipOval(
-                          child: Image.network(
-                            imageUrl,
-                            width: 40,
-                            height: 40,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Text(
-                              name[0].toUpperCase(),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.green,
+                return InkWell(
+                  onTap: () => _showProfileDialog(user!.phone),
+                  child: CircleAvatar(
+                    radius: 20,
+                    backgroundColor: Colors.green[50],
+                    child: imageUrl != null && imageUrl.isNotEmpty
+                        ? ClipOval(
+                      
+                            child: Image.network(
+                              imageUrl,
+                              width: 40,
+                              height: 40,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Text(
+                                name[0].toUpperCase(),
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green,
+                                ),
                               ),
                             ),
+                          )
+                        : Text(
+                            name[0].toUpperCase(),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green,
+                            ),
                           ),
-                        )
-                      : Text(
-                          name[0].toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green,
-                          ),
-                        ),
+                  ),
                 );
               },
               loading: () => const CircleAvatar(
@@ -621,7 +628,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         builder: (context) => AlertDialog(
           title: const Text('إلغاء حظر المستخدم'),
           content: Text(
-            'هل أنت متأكد من إلغاء حظر ${widget.receiverEmail.split('@').first}؟',
+            'هل أنت متأكد من إلغاء حظر ${widget.receiverPhone}؟',
           ),
           actions: [
             TextButton(
@@ -641,7 +648,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         try {
           await ref
               .read(chatServiceProvider)
-              .unblockUser(widget.chat.id, currentUser.email);
+              .unblockUser(widget.chat.id, currentUser.phone);
 
           ref.invalidate(chatBlockStatusProvider(widget.chat.id));
           ref.invalidate(messagesProvider(widget.chat.id));
@@ -665,7 +672,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         builder: (context) => AlertDialog(
           title: const Text('حظر المستخدم'),
           content: Text(
-            'هل أنت متأكد من حظر ${widget.receiverEmail.split('@').first}؟\n\nلن تتمكن من إرسال أو استقبال رسائل من هذا المستخدم.',
+            'هل أنت متأكد من حظر ${widget.receiverPhone}؟\n\nلن تتمكن من إرسال أو استقبال رسائل من هذا المستخدم.',
           ),
           actions: [
             TextButton(
@@ -685,7 +692,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         try {
           await ref
               .read(chatServiceProvider)
-              .blockUser(widget.chat.id, currentUser.email);
+              .blockUser(widget.chat.id, currentUser.phone);
 
           ref.invalidate(chatBlockStatusProvider(widget.chat.id));
           ref.invalidate(messagesProvider(widget.chat.id));
@@ -1156,7 +1163,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'لن يتمكن ${message.senderUser == ref.read(appUserEmailProvider) ? 'المستلم' : 'المرسل'} من رؤية هذه الرسالة بعد الحذف',
+                      'لن يتمكن ${message.senderUser == ref.read(appUserPhoneProvider) ? 'المستلم' : 'المرسل'} من رؤية هذه الرسالة بعد الحذف',
                       style: TextStyle(fontSize: 12, color: Colors.orange[700]),
                     ),
                   ),
@@ -1263,7 +1270,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'لن تتمكن من إرسال أو استقبال رسائل من ${widget.receiverEmail.split('@').first}',
+                    'لن تتمكن من إرسال أو استقبال رسائل من ${widget.receiverPhone}',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontSize: 12,
@@ -1361,7 +1368,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       ),
                     )
                   : IconButton(
-                      onPressed: _sendMessage,
+                      onPressed: () {
+                        if(_isSending){
+                          Timer(Duration(seconds: 1), () {
+                            // الكود اللي بدك إياه يتنفذ بعد ثانية واحدة هنا
+                            _sendMessage();
+                            setState(() {
+                              _isSending=false;
+                            });
+                          });
+                        }else{
+                          setState(() {
+                            _isSending=true;
+                          });
+                        }
+
+                      },
                       icon: CircleAvatar(
                         backgroundColor: Colors.green,
                         child: const Icon(
@@ -1374,6 +1396,69 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showProfileDialog(String recevPhone) {
+    final recevUser = ref.watch(userDataProvider(recevPhone));
+    if (recevUser == null) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('الملف الشخصي'),
+        content: recevUser.when(
+          data:(data) =>  Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 50,
+                backgroundColor: Colors.green[100],
+                child: Text(
+                  data!.displayName[0].toUpperCase(),
+                  style: const TextStyle(fontSize: 40, color: Colors.green),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                data.displayName,
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(data.phone, style: const TextStyle(color: Colors.grey)),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: data.isOnline ? Colors.green : Colors.grey,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    data.isOnline ? 'متصل الآن' : 'غير متصل',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          loading: () => CircularProgressIndicator(),
+          error: (error, stackTrace) {
+           return Text(' خطا في جلب بيانات المستخدم$error ');
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إغلاق'),
+          ),
+        ],
       ),
     );
   }

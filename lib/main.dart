@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:ChatApp/Screen/home.dart';
 import 'package:ChatApp/Screen/login.dart';
@@ -7,17 +9,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:hive/hive.dart';
+import 'package:hive_flutter/adapters.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'Notifications/CacheService.dart';
 import 'Notifications/NotificationHandler.dart';
 import 'Notifications/PendingNotificationsService.dart';
 import 'Notifications/notifications.dart';
+import 'hiveModle/HiveChat.dart';
+import 'hiveModle/HiveUser.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
     // 1️⃣ تحميل .env أولاً
     await dotenv.load(fileName: ".env");
     print('✅ تم تحميل .env');
@@ -26,10 +36,27 @@ void main() async {
   }
 
   try {
+    // ✅ تهيئة Hive
+    await Hive.initFlutter();
+
+    // ✅ تسجيل Adapter HiveChat
+    Hive.registerAdapter(HiveChatAdapter());
+
+    // ✅ فتح الصناديق المطلوبة
+    await Hive.openBox<HiveChat>(AdvancedCacheService.chatBoxName);
+    await Hive.openBox(AdvancedCacheService.metadataBoxName);
+
+    // ✅ تهيئة خدمة الكاش (Singleton)
+    final cacheService = AdvancedCacheService();
+
     // 2️⃣ تهيئة Firebase
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+    // 🌟 السطر السحري: تفعيل كاش فايربيز الداخلي على الهاتف للعمل أوفلاين
+    FirebaseDatabase.instance.setPersistenceEnabled(true);
+    FirebaseDatabase.instance.setPersistenceCacheSizeBytes(
+      100000000,
+    ); // تحديد مساحة الكاش (مثلاً 100 ميجابايت)
+
+
     print('✅ تم تهيئة Firebase بنجاح');
   } catch (e) {
     print('❌ خطأ في تهيئة Firebase: $e');
@@ -55,6 +82,11 @@ void main() async {
   try {
     // 5️⃣ بدء مراقبة الإشعارات المعلقة
     PendingNotificationsService().startMonitoring();
+
+    // ✅ تنظيف الإشعارات القديمة كل يوم
+    Timer.periodic(const Duration(days: 1), (timer) {
+      PendingNotificationsService().cleanOldNotifications();
+    });
     print('✅ تم بدء مراقبة الإشعارات المعلقة');
   } catch (e) {
     print('❌ خطأ في مراقبة الإشعارات: $e');
@@ -96,27 +128,26 @@ class _MyAppState extends ConsumerState<MyApp> {
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(builder: (context) => HomeScreen()),
-                (route) => false,
+            (route) => false,
           );
         }
       }
-
 
       if (isLoggedIn) {
         final prefs = await SharedPreferences.getInstance();
         final userEmail = prefs.getString('userEmail');
 
         if (userEmail != null) {
-          final user = await authService.getUserByEmail(userEmail);
+          final user = await authService.getUserByPhone(userEmail);
 
           if (user != null && mounted) {
             ref.read(appUserDataProvider.notifier).state = user;
-            ref.read(appUserEmailProvider.notifier).state = user.email;
+            ref.read(appUserPhoneProvider.notifier).state = user.email;
             ref.read(isLoadingProvider.notifier).state = true;
 
             // ✅ تسجيل المستخدم في OneSignal
             try {
-              await NotificationService().loginUser(user.email);
+              await NotificationService().loginUser(user.phone);
               print('✅ تم تسجيل ${user.email} في OneSignal');
             } catch (e) {
               print('❌ خطأ في تسجيل OneSignal: $e');
@@ -137,11 +168,7 @@ class _MyAppState extends ConsumerState<MyApp> {
     if (_isChecking) {
       return const MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: Scaffold(
-          body: Center(
-            child: CircularProgressIndicator(),
-          ),
-        ),
+        home: Scaffold(body: Center(child: CircularProgressIndicator())),
       );
     }
 
@@ -151,6 +178,7 @@ class _MyAppState extends ConsumerState<MyApp> {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.green),
       home: _isLoggedIn ? const HomeScreen() : const LoginScreen(),
+
     );
   }
 }

@@ -1,23 +1,28 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter_riverpod/legacy.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../Notifications/CacheService.dart';
 import '../model/chat.dart';
 import '../model/Message.dart';
 
+var unreadCount = 0;
 
-var unreadCount=0;
 // Provider لقاعدة البيانات
 final firebaseDatabaseProvider = Provider<FirebaseDatabase>((ref) {
   return FirebaseDatabase.instance;
 });
-final unreadCountMessages=StateProvider<int>((ref) {
-  return unreadCount;
-},);
 
+final unreadCountMessages = StateProvider<int>((ref) {
+  return unreadCount;
+});
+
+final cacheServiceProvider = Provider<AdvancedCacheService>((ref) {
+  return AdvancedCacheService();
+});
 // Provider لخدمة المحادثات
 final chatServiceProvider = Provider<ChatService>((ref) {
   final db = ref.watch(firebaseDatabaseProvider);
@@ -27,76 +32,99 @@ final chatServiceProvider = Provider<ChatService>((ref) {
 // ✅ Provider لمراقبة حالة الحظر في الوقت الفعلي
 final chatBlockStatusProvider = StreamProvider.family<Map<String, dynamic>?, String>((ref, chatId) {
   final db = ref.watch(firebaseDatabaseProvider);
-  
+
   final controller = StreamController<Map<String, dynamic>?>.broadcast();
-  
+
   final listener = db.ref('chats').child(chatId).onValue.listen((event) {
     final data = event.snapshot.value as Map<dynamic, dynamic>?;
     if (data == null) {
       controller.add(null);
       return;
     }
-    
+
     controller.add({
       'isBlocked': data['isBlocked'] ?? false,
       'blockedBy': data['blockedBy'],
       'blockedAt': data['blockedAt'],
     });
   });
-  
+
   ref.onDispose(() {
     listener.cancel();
     controller.close();
   });
-  
+
   return controller.stream;
 });
 
-// Stream Provider للمحادثات - مع تحديث فوري
-final chatsProvider = StreamProvider.family<List<Chat>, String>((ref, userEmail) {
-  final db = ref.watch(firebaseDatabaseProvider);
+// Stream Provider للمحادثات - نسخة مطورة تدعم إعادة الإحياء التلقائي عند استقبال رسائل جديدة
+// ✅ Provider للمحادثات مع دعم الأوفلاين
+final chatsProvider = StreamProvider.family<List<Chat>, String>((ref, userPhone) {
+  final db = FirebaseDatabase.instance;
+  final cacheService = ref.watch(cacheServiceProvider);
 
-  // نراقب مرجع 'chats' مباشرة
-  return db.ref('chats').onValue.map((event) {
-    final data = event.snapshot.value as Map<dynamic, dynamic>? ?? {};
-    final List<Chat> chats = [];
+  final controller = StreamController<List<Chat>>.broadcast();
 
-
-    data.forEach((chatId, chatData) {
-      final chatMap = Map<String, dynamic>.from(chatData);
-      final participants = List<String>.from(chatMap['participants'] ?? []);
-      final deletedFor = Map<String, dynamic>.from(chatMap['deletedFor'] ?? {});
-
-
-      // التحقق من أن المستخدم جزء من المحادثة ولم يحذفها
-      if (participants.contains(userEmail) && !deletedFor.containsKey(userEmail)) {
-        final messages=List<Chat>.from(chatMap['message'] ?? []);
-        for(int i =0;i<messages.length;i++){
-          if(!chatMap['isRead']){
-            ref.read(unreadCountMessages.notifier).state++;
-          }
-        }
-        chats.add(Chat(
-          id: chatId.toString(),
-          participants: participants,
-          lastMessage: chatMap['lastMessage'] ?? '',
-          lastMessageTime: chatMap['lastMessageTime'] ?? 0,
-          updatedAt: chatMap['updatedAt'] ?? 0,
-          // بقية الحقول...
-          isBlocked: chatMap['isBlocked'] ?? false,
-          blockedBy: chatMap['blockedBy'],
-          lastMessageSender: chatMap['lastMessageSender'],
-          createdAt: chatMap['createdAt'],
-          isDeletedChatForYou: false,
-          unreadCount: chatMap['unreadCount'] ?? 0
-        ));
+  // ✅ 1. عرض البيانات من الكاش فوراً (إذا وجدت)
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (cacheService.hasCachedData()) {
+      final cachedChats = cacheService.getCachedChats();
+      if (cachedChats.isNotEmpty) {
+        print('📱 عرض ${cachedChats.length} محادثة من الكاش المحلي');
+        controller.add(cachedChats);
       }
+    }
+  });
+
+  // ✅ 2. إذا كان هناك اتصال، استمع للتحديثات من Firebase
+  if (cacheService.isOnline) {
+    final listener = db.ref('chats').onValue.listen((event) {
+      final data = event.snapshot.value as Map<dynamic, dynamic>? ?? {};
+      final List<Chat> chats = [];
+
+      data.forEach((chatId, chatData) {
+        final chatMap = Map<String, dynamic>.from(chatData);
+        final participants = List<String>.from(chatMap['participants'] ?? []);
+        final deletedFor = Map<String, dynamic>.from(chatMap['deletedFor'] ?? {});
+
+        if (participants.contains(userPhone) && !deletedFor.containsKey(userPhone)) {
+          final chat = Chat(
+            id: chatId.toString(),
+            participants: participants,
+            lastMessage: chatMap['lastMessage'] ?? '',
+            lastMessageTime: chatMap['lastMessageTime'] ?? 0,
+            lastMessageSender: chatMap['lastMessageSender'] ?? '',
+            createdAt: chatMap['createdAt'] ?? 0,
+            updatedAt: chatMap['updatedAt'] ?? 0,
+            deletedFor: deletedFor,
+            clearedFor: Map<String, dynamic>.from(chatMap['clearedFor'] ?? {}),
+            isBlocked: chatMap['isBlocked'] ?? false,
+            blockedBy: chatMap['blockedBy'],
+            isDeletedChatForYou: deletedFor.containsKey(userPhone),
+          );
+          chats.add(chat);
+        }
+      });
+
+      chats.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
+      // ✅ حفظ البيانات في الكاش
+      cacheService.cacheChats(chats);
+
+      controller.add(chats);
     });
 
-    // ترتيب المحادثات حسب الأحدث
-    chats.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return chats;
-  });
+    ref.onDispose(() {
+      listener.cancel();
+      controller.close();
+    });
+  } else {
+    // ✅ 3. وضع الأوفلاين - اعرض فقط البيانات المخزنة
+    print('⚠️ وضع الأوفلاين - عرض البيانات المخزنة فقط');
+    controller.close();
+  }
+
+  return controller.stream;
 });
 
 class ChatService {
@@ -104,39 +132,32 @@ class ChatService {
 
   ChatService(this.db);
 
-  // دالة لتنظيف البريد الإلكتروني من الأحرف غير المسموحة
-  String _cleanEmail(String email) {
-    return email
-        .replaceAll('@', '_at_')
-        .replaceAll('.', '_dot_')
-        .replaceAll('#', '_hash_')
-        .replaceAll('\$', '_dollar_')
-        .replaceAll('[', '_lb_')
-        .replaceAll(']', '_rb_')
-        .replaceAll('/', '_slash_')
-        .replaceAll('\\', '_bslash_');
+  // تنظيف رقم الهاتف لإنشاء معرف المحادثة بأمان
+  String _cleanPhone(String phone){
+    return phone.replaceAll('+', 'p');
   }
 
-  // إنشاء معرف محادثة فريد وآمن
-  String _generateChatId(String email1, String email2) {
-    final List<String> emails = [email1, email2]..sort();
-    final String clean1 = _cleanEmail(emails[0]);
-    final String clean2 = _cleanEmail(emails[1]);
+  // إنشاء معرف محادثة فريد وآمن يعتمد على أرقام الهواتف مرتبة أبجدياً
+  String _generateChatId(String phone1, String phone2) {
+    final List<String> phones = [phone1, phone2]..sort();
+    final String clean1 = _cleanPhone(phones[0]);
+    final String clean2 = _cleanPhone(phones[1]);
     return '${clean1}_$clean2';
   }
 
-  // إنشاء محادثة جديدة
+  // إنشاء محادثة جديدة أو استعادتها إن كانت محذوفة
   Future<String> createChat({
-    required String user1Email,
-    required String user2Email,
+    required String user1Phone,
+    required String user2Phone,
     String? initialMessage,
   }) async {
     try {
-      if (user1Email.isEmpty || user2Email.isEmpty) {
-        throw Exception('البريد الإلكتروني لا يمكن أن يكون فارغاً');
+      if (user1Phone.isEmpty || user2Phone.isEmpty) {
+        throw Exception('رقم الهاتف لا يمكن أن يكون فارغاً');
       }
+      final dataUser = await db.ref('users').orderByChild('phone').equalTo(user2Phone).get();
 
-      final chatId = _generateChatId(user1Email, user2Email);
+      final chatId = _generateChatId(user1Phone, user2Phone);
       final chatRef = db.ref('chats').child(chatId);
       final snapshot = await chatRef.get();
 
@@ -144,13 +165,13 @@ class ChatService {
         final chatData = snapshot.value as Map<dynamic, dynamic>?;
         final deletedFor = Map<String, dynamic>.from(chatData?['deletedFor'] ?? {});
 
-        if (deletedFor.containsKey(user1Email)) {
-          deletedFor.remove(user1Email);
+        if (deletedFor.containsKey(user1Phone)) {
+          deletedFor.remove(user1Phone);
           await chatRef.update({
             'deletedFor': deletedFor,
             'updatedAt': DateTime.now().millisecondsSinceEpoch,
           });
-          print('✅ تم استعادة المحادثة للمستخدم $user1Email');
+          print('✅ تم استعادة المحادثة للمستخدم $user1Phone');
         }
 
         print('✅ المحادثة موجودة مسبقاً: $chatId');
@@ -158,40 +179,49 @@ class ChatService {
       }
 
       final now = DateTime.now().millisecondsSinceEpoch;
-      bool isConnected=false;
-      StreamSubscription? connectionSubscription= InternetConnection().onStatusChange.listen((status) {
+      bool isConnected = false;
+      StreamSubscription? connectionSubscription = InternetConnection().onStatusChange.listen((status) {
         isConnected = status == InternetStatus.connected;
       });
 
+      if (dataUser.exists) {
+        await chatRef.set({
+          'participants': [user1Phone, user2Phone],
+          'createdAt': now,
+          'updatedAt': now,
+          'lastMessage': initialMessage ?? '',
+          'lastMessageTime': now,
+          'lastMessageSender': user1Phone,
+          'deletedFor': {},
+          'clearedFor': {},
+          'isBlocked': false,
+          'blockedBy': null,
+          'isSynced': isConnected,
+          'unreadCount': {
+            _cleanPhone(user1Phone): 0,
+            _cleanPhone(user2Phone): 0,
+          }
+        });
 
-      await chatRef.set({
-        'participants': [user1Email, user2Email],
-        'createdAt': now,
-        'updatedAt': now,
-        'lastMessage': initialMessage ?? '',
-        'lastMessageTime': now,
-        'lastMessageSender': user1Email,
-        'deletedFor': {},
-        'clearedFor': {},
-        'isBlocked': false,
-        'blockedBy': null,
-        'isSynced' : isConnected,
-        'unreadCount' : 0
-      });
+        print('✅ تم إنشاء المحادثة بنجاح: $chatId');
+/*
+        if (initialMessage != null && initialMessage.isNotEmpty) {
+          //final messageService = MessageService(db);
+          final message = Message.create(
+            senderUser: user1Phone,
+            resevUser: user2Phone,
+            body: initialMessage,
+            chatId: chatId,
+            isSynced: isConnected,
+          );
 
-      print('✅ تم إنشاء المحادثة بنجاح: $chatId');
+          await messageService.sendMessage(message);
+        }
 
-      if (initialMessage != null && initialMessage.isNotEmpty) {
-        final messageService = MessageService(db);
-        final message = Message.create(
-          senderUser: user1Email,
-          resevUser: user2Email,
-          body: initialMessage,
-          chatId: chatId,
-          isSynced: isConnected,
-
-        );
-        await messageService.sendMessage(message);
+ */
+      } else {
+        Fluttertoast.showToast(msg: 'المستخدم غير موجود في التطبيق');
+        return 'noUser';
       }
 
       return chatId;
@@ -202,16 +232,16 @@ class ChatService {
   }
 
   // ✅ دالة لحظر المستخدم
-  Future<void> blockUser(String chatId, String myId) async {
+  Future<void> blockUser(String chatId, String myPhone) async {
     try {
       final chatRef = db.ref('chats').child(chatId);
       await chatRef.update({
         'isBlocked': true,
-        'blockedBy': myId,
+        'blockedBy': myPhone,
         'blockedAt': DateTime.now().millisecondsSinceEpoch,
         'updatedAt': DateTime.now().millisecondsSinceEpoch,
       });
-      print('✅ تم حظر المستخدم بواسطة $myId');
+      print('✅ تم حظر المستخدم بواسطة $myPhone');
     } catch (e) {
       print('❌ خطأ في حظر المستخدم: $e');
       rethrow;
@@ -219,7 +249,7 @@ class ChatService {
   }
 
   // ✅ دالة لإلغاء حظر المستخدم
-  Future<void> unblockUser(String chatId, String myId) async {
+  Future<void> unblockUser(String chatId, String myPhone) async {
     try {
       final chatRef = db.ref('chats').child(chatId);
       await chatRef.update({
@@ -228,21 +258,21 @@ class ChatService {
         'unblockedAt': DateTime.now().millisecondsSinceEpoch,
         'updatedAt': DateTime.now().millisecondsSinceEpoch,
       });
-      print('✅ تم إلغاء حظر المستخدم بواسطة $myId');
+      print('✅ تم إلغاء حظر المستخدم بواسطة $myPhone');
     } catch (e) {
       print('❌ خطأ في إلغاء حظر المستخدم: $e');
       rethrow;
     }
   }
 
-  // التحقق من حالة حذف المحادثة
-  Future<bool> isChatDeletedForUser(String chatId, String userId) async {
+  // التحقق من حالة حذف المحادثة لمستخدم معين برقم هاتفه
+  Future<bool> isChatDeletedForUser(String chatId, String userPhone) async {
     try {
       final snapshot = await db
           .ref('chats')
           .child(chatId)
           .child('deletedFor')
-          .child(userId)
+          .child(userPhone)
           .get();
       return snapshot.exists;
     } catch (e) {
@@ -281,10 +311,10 @@ class ChatService {
     }
   }
 
-  // حذف محادثة لمستخدم معين
-  Future<void> deleteChatForUser(String chatId, String userId) async {
+  // حذف محادثة لمستخدم معين بناءً على رقم هاتفه لضمان الفلترة الصحيحة
+  Future<void> deleteChatForUser(String chatId, String userPhone) async {
     try {
-      print('🔍 بدء حذف المحادثة للمستخدم: chatId=$chatId, userId=$userId');
+      print('🔍 بدء حذف المحادثة للمستخدم: chatId=$chatId, userPhone=$userPhone');
 
       final chatRef = db.ref('chats').child(chatId);
       final snapshot = await chatRef.get();
@@ -299,21 +329,21 @@ class ChatService {
       }
 
       final deletedFor = Map<String, dynamic>.from(chatData['deletedFor'] ?? {});
-      deletedFor[userId] = DateTime.now().millisecondsSinceEpoch;
+      deletedFor[userPhone] = DateTime.now().millisecondsSinceEpoch;
 
       await chatRef.update({
         'deletedFor': deletedFor,
         'updatedAt': DateTime.now().millisecondsSinceEpoch,
       });
 
-      print('✅ تم حذف المحادثة بنجاح للمستخدم $userId');
+      print('✅ تم حذف المحادثة بنجاح للمستخدم $userPhone');
     } catch (e) {
       print('❌ خطأ في حذف المحادثة للمستخدم: $e');
       rethrow;
     }
   }
 
-  // حذف المحادثة بالكامل
+  // حذف المحادثة بالكامل من السيرفر لكل الأطراف
   Future<void> deleteChatComplete(String chatId) async {
     try {
       final chatRef = db.ref('chats').child(chatId);
@@ -331,8 +361,8 @@ class ChatService {
     }
   }
 
-  // استعادة محادثة محذوفة
-  Future<void> restoreDeletedChat(String chatId, String userId) async {
+  // استعادة محادثة محذوفة لمستخدم معين برقم هاتفه
+  Future<void> restoreDeletedChat(String chatId, String userPhone) async {
     try {
       final chatRef = db.ref('chats').child(chatId);
       final snapshot = await chatRef.get();
@@ -348,13 +378,13 @@ class ChatService {
 
       final deletedFor = Map<String, dynamic>.from(chatData['deletedFor'] ?? {});
 
-      if (deletedFor.containsKey(userId)) {
-        deletedFor.remove(userId);
+      if (deletedFor.containsKey(userPhone)) {
+        deletedFor.remove(userPhone);
         await chatRef.update({
           'deletedFor': deletedFor,
           'updatedAt': DateTime.now().millisecondsSinceEpoch,
         });
-        print('✅ تم استعادة المحادثة للمستخدم $userId');
+        print('✅ تم استعادة المحادثة للمستخدم $userPhone');
       }
     } catch (e) {
       print('❌ خطأ في استعادة المحادثة: $e');
@@ -362,33 +392,8 @@ class ChatService {
     }
   }
 
-  // استخراج البريد الإلكتروني من chatId
-  String extractEmailFromChatId(String chatId, String currentUserEmail) {
-    final parts = chatId.split('_');
-    for (var part in parts) {
-      try {
-        String restored = part
-            .replaceAll('_at_', '@')
-            .replaceAll('_dot_', '.')
-            .replaceAll('_hash_', '#')
-            .replaceAll('_dollar_', '\$')
-            .replaceAll('_lb_', '[')
-            .replaceAll('_rb_', ']')
-            .replaceAll('_slash_', '/')
-            .replaceAll('_bslash_', '\\');
-
-        if (restored != currentUserEmail && restored.contains('@')) {
-          return restored;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-    return '';
-  }
-
-  // الحصول على جميع محادثات المستخدم
-  Future<List<Chat>> getAllUserChats(String userEmail, {bool includeDeleted = false}) async {
+  // ✅ تم التعديل: جلب جميع محادثات المستخدم بناءً على رقم هاتفه (نسخة مستقرة للـ Future)
+  Future<List<Chat>> getAllUserChats(String userPhone, {bool includeDeleted = false}) async {
     try {
       final snapshot = await db.ref('chats').get();
       final data = snapshot.value as Map<dynamic, dynamic>? ?? {};
@@ -399,8 +404,11 @@ class ChatService {
         final participants = List<String>.from(chatMap['participants'] ?? []);
         final deletedFor = Map<String, dynamic>.from(chatMap['deletedFor'] ?? {});
 
-        if (participants.contains(userEmail)) {
-          if (includeDeleted || !deletedFor.containsKey(userEmail)) {
+        if (participants.contains(userPhone)) {
+          if (includeDeleted || !deletedFor.containsKey(userPhone)) {
+            final cleanPhoneKey = userPhone.replaceAll('+', 'p');
+            final int currentUnread = chatMap['unreadCount']?[cleanPhoneKey] ?? 0;
+
             chats.add(Chat(
               id: chatId.toString(),
               participants: participants,
@@ -413,7 +421,8 @@ class ChatService {
               clearedFor: Map<String, dynamic>.from(chatMap['clearedFor'] ?? {}),
               isBlocked: chatMap['isBlocked'] ?? false,
               blockedBy: chatMap['blockedBy'],
-              isDeletedChatForYou: deletedFor.containsKey(userEmail),
+              isDeletedChatForYou: deletedFor.containsKey(userPhone),
+              unreadCount: currentUnread,
             ));
           }
         }
@@ -426,8 +435,43 @@ class ChatService {
       return [];
     }
   }
+
+  // دالة إرسال دعوة للمستخدمين غير المسجلين عبر الواتساب مباشرة
+  Future<void> sendWhatsAppInvite({required String phoneNumber, required String contactName}) async {
+    String cleanNumber = phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
+
+    if (cleanNumber.startsWith('00')) {
+      cleanNumber = cleanNumber.substring(2);
+    }
+    if (cleanNumber.startsWith('0') && !cleanNumber.startsWith('00')) {
+      cleanNumber = '970${cleanNumber.substring(1)}';
+    }
+
+    final String message = "مرحباً $contactName! 👋\n"
+        "أنا أستخدم تطبيق ChatApp الجديد للمحادثات السريعة والآمنة 🚀.\n"
+        "لقد أضفتك للتو من جهات الاتصال لدي، قم بتحميل التطبيق الآن ولنبدأ الدردشة:\n"
+        "👉 [رابط تحميل تطبيقك هنا]";
+
+    final Uri whatsappUri = Uri.parse(
+        'https://wa.me/$cleanNumber?text=${Uri.encodeComponent(message)}'
+    );
+
+    try {
+      if (await canLaunchUrl(whatsappUri)) {
+        await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
+        print("✅ تم فتح الواتساب بنجاح لإرسال الدعوة لـ $cleanNumber");
+      } else {
+        print("❌ لا يمكن فتح الرابط، جاري محاولة الفتح بالرابط البديل");
+        final Uri backupUri = Uri.parse('https://api.whatsapp.com/send?phone=$cleanNumber&text=${Uri.encodeComponent(message)}');
+        await launchUrl(backupUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      print("❌ خطأ أثناء محاولة فتح الواتساب: $e");
+    }
+  }
 }
 
+/*
 // خدمة الرسائل
 class MessageService {
   final FirebaseDatabase db;
@@ -448,6 +492,7 @@ class MessageService {
 
       await newMessageRef.set(messageWithId);
 
+      // تحديث بيانات المحادثة الأساسية عند إرسال رسالة جديدة
       await db.ref('chats').child(message.chatId).update({
         'lastMessage': message.body,
         'lastMessageTime': message.timestamp,
@@ -460,7 +505,8 @@ class MessageService {
     }
   }
 
-  Future<void> markMessagesAsRead(String chatId, String userEmail) async {
+  // ✅ تحديث دالة القراءة لتتوافق مع معيار رقم الهاتف بالكامل
+  Future<void> markMessagesAsRead(String chatId, String userPhone) async {
     try {
       final messagesRef = db.ref('chats').child(chatId).child('messages');
       final snapshot = await messagesRef.get();
@@ -472,7 +518,8 @@ class MessageService {
 
       messages.forEach((key, value) {
         final messageData = Map<String, dynamic>.from(value);
-        if (messageData['resevUser'] == userEmail && messageData['isRead'] != true) {
+        // التحقق باستخدام رقم الهاتف المستقبل للرسالة
+        if (messageData['resevUser'] == userPhone && messageData['isRead'] != true) {
           updates['$key/isRead'] = true;
         }
       });
@@ -481,7 +528,10 @@ class MessageService {
         await messagesRef.update(updates);
       }
     } catch (e) {
-      print('❌ خطأ في تحديث حالة القراءة: $e');
+      print('❌ خطأ في تحديث حالة القراءة للرسائل: $e');
     }
   }
+
 }
+
+ */

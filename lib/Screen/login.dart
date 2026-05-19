@@ -18,7 +18,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   // Controllers
   final nameController = TextEditingController();
-  final emailController = TextEditingController();
+  final phoneController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
 
@@ -29,7 +29,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   void dispose() {
     nameController.dispose();
-    emailController.dispose();
+    phoneController.dispose();
     passwordController.dispose();
     confirmPasswordController.dispose();
     super.dispose();
@@ -39,12 +39,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _saveUserSession(AppUser user) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isLogin', true);
-    await prefs.setString('userEmail', user.email);
+    await prefs.setString('userEmail', user.email ?? '');
     await prefs.setString('userId', user.id ?? '');
     await prefs.setString('userName', user.name);
 
     ref.read(appUserDataProvider.notifier).state = user;
-    ref.read(appUserEmailProvider.notifier).state = user.email;
+    ref.read(appUserPhoneProvider.notifier).state = user.email;
   }
 
   // زر الضغط عند الدخول أو التسجيل الرسمي
@@ -54,7 +54,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (_isRegisterMode) {
       _handleRegister(
         nameController.text.trim(),
-        emailController.text.trim(),
+        phoneController.text.trim(),
         passwordController.text.trim(),
       );
     } else {
@@ -67,7 +67,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     try {
       final authService = ref.read(authServiceProvider);
       final user = await authService.login(
-        emailController.text.trim(),
+        phoneController.text.trim(),
         passwordController.text.trim(),
         context,
       );
@@ -95,11 +95,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
-  Future<void> _handleRegister(String displayName, String email, String password) async {
+  Future<void> _handleRegister(String displayName, String phone, String password) async {
     setState(() => _isLoading = true);
     try {
       final authService = ref.read(authServiceProvider);
-      final user = await authService.register(email, password, context);
+      final user = await authService.register(phone, password, context);
 
       if (user != null && mounted) {
         if (displayName.isNotEmpty) {
@@ -111,6 +111,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           final updatedUser = AppUser(
             id: user.id,
             email: user.email,
+            phone: phone,
             displayName: displayName.trim(),
             isOnline: true,
             lastSeen: DateTime.now().millisecondsSinceEpoch,
@@ -234,21 +235,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
                         // حقل البريد الإلكتروني (مشترك)
                         TextFormField(
-                          controller: emailController,
-                          keyboardType: TextInputType.emailAddress,
+                          maxLength: 10,
+                          controller: phoneController,
+                          keyboardType: TextInputType.phone,
                           enabled: !_isLoading,
                           decoration: InputDecoration(
-                            labelText: 'البريد الإلكتروني',
-                            hintText: 'example@email.com',
-                            prefixIcon: const Icon(Icons.email, color: Colors.green),
+                            helperMaxLines: 1,
+                            labelText: 'رقم الهاتف',
+                            hintText: '0590000000',
+                            prefixIcon: const Icon(Icons.phone, color: Colors.green),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
                           ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
-                              return 'الرجاء إدخال البريد الإلكتروني';
+                              return 'الرجاء إدخال رقم الهاتف';
                             }
-                            if (!value.contains('@')) {
-                              return 'البريد الإلكتروني غير صالح';
+                            if(value.contains('+') && value.length<14){
+                              return 'رقم الهاتف غير صالح';
+                            }
+                            if (value.length<10) {
+                              return 'رقم الهاتف غير صالح';
                             }
                             return null;
                           },

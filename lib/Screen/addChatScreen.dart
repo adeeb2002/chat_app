@@ -1,7 +1,11 @@
 import 'package:ChatApp/Provider/chatProvider.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_contacts/contact.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'chatScreen.dart';
 
 class AddChatScreen extends ConsumerStatefulWidget {
   const AddChatScreen({super.key});
@@ -35,20 +39,21 @@ class _AddChatScreenState extends ConsumerState<AddChatScreen> {
 
     try {
       final chatService = ref.read(chatServiceProvider);
-      final receiverEmail = receiverController.text.trim();
+      final receiverPhone = receiverController.text.trim();
       
       // إنشاء محادثة جديدة
       final chatId = await chatService.createChat(
-        user1Email: currentUser.email,
-        user2Email: receiverEmail,
+        user1Phone: currentUser.phone,
+        user2Phone: receiverPhone,
       );
       
-      if (mounted) {
+      if (mounted && chatId!='noUser') {
         _showSnackBar('تم إنشاء المحادثة بنجاح', isError: false);
         
         // العودة إلى الشاشة الرئيسية مع تمرير chatId
         Navigator.pop(context, chatId);
       }
+
     } catch (e) {
       _showSnackBar('خطأ في إنشاء المحادثة: $e');
     } finally {
@@ -113,7 +118,7 @@ class _AddChatScreenState extends ConsumerState<AddChatScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'أدخل البريد الإلكتروني للشخص الذي تريد التحدث معه',
+                'أدخل الرقم للشخص الذي تريد التحدث معه',
                 style: TextStyle(color: Colors.grey, fontSize: 14),
               ),
               const SizedBox(height: 32),
@@ -154,13 +159,13 @@ class _AddChatScreenState extends ConsumerState<AddChatScreen> {
               ),
               const SizedBox(height: 24),
               
-              // حقل البريد الإلكتروني للمستلم
+              // حقل الرقم للمستلم
               TextFormField(
                 controller: receiverController,
-                keyboardType: TextInputType.emailAddress,
+                keyboardType: TextInputType.phone,
                 decoration: InputDecoration(
-                  labelText: 'البريد الإلكتروني للمستلم',
-                  hintText: 'friend@example.com',
+                  labelText: 'الرقم للمستلم',
+                  hintText: '0590000000',
                   prefixIcon: const Icon(Icons.person_add, color: Colors.green),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(15),
@@ -176,10 +181,10 @@ class _AddChatScreenState extends ConsumerState<AddChatScreen> {
                 ),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
-                    return 'الرجاء إدخال البريد الإلكتروني للمستلم';
+                    return 'الرجاء إدخال الرقم للمستلم';
                   }
-                  if (!value.contains('@')) {
-                    return 'البريد الإلكتروني غير صالح';
+                  if (value.length<10) {
+                    return 'رقم الهاتف غير صالح';
                   }
                   if (value == currentUser?.email) {
                     return 'لا يمكنك إنشاء محادثة مع نفسك';
@@ -250,6 +255,89 @@ class _AddChatScreenState extends ConsumerState<AddChatScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _handleContactTap(Contact contact) async {
+    final myPhone = ref.read(appUserPhoneProvider); // الـ Provider الجديد لرقم هاتف المستخدم الحالي
+    if (myPhone == null) return;
+
+    if (contact.phones.isEmpty) {
+      _showInviteDialog(contact.displayName, "لا يمتلك رقم هاتف مخزن.",contact.photo.toString());
+      return;
+    }
+
+    // جلب رقم الهاتف وتجهيزه (يفضل أن تكون الأرقام مخزنة بصيغة دولية كاملة)
+    final rawPhone = contact.phones.first.number;
+
+    // تنظيف الرقم من المساحات أو الشرطات الافتراضية التي يضعها الهاتف (مثل: 059-999-999)
+    final contactPhone = rawPhone.replaceAll(' ', '').replaceAll('-', '');
+
+    setState(() => _isLoading = true);
+
+    String _cleanPhone(String phone){
+      return phone.replaceAll('+', 'p');
+    }
+
+    try {
+      final db = FirebaseDatabase.instance;
+      final cleanTargetPhone = _cleanPhone(contactPhone);
+
+      // الفحص في عقدة users بناءً على رقم الهاتف
+      final userSnapshot = await db.ref('users').child(cleanTargetPhone).get();
+
+      if (userSnapshot.exists) {
+        // المستخدم مسجل! ننشئ المحادثة برقم الهاتف مباشرة
+        final chatService = ref.read(chatServiceProvider);
+        final chatId = await chatService.createChat(
+          user1Phone: myPhone, // المعامل هنا سيمثل رقم هاتف المرسل
+          user2Phone: contactPhone, // رقم هاتف المستقبل
+          initialMessage: "مرحباً! لقد أضفتك من جهات الاتصال.",
+        );
+
+        if (mounted) {
+          Navigator.pop(context);
+        }
+      } else {
+        // غير مسجل -> دعوة عبر SMS
+        _showInviteDialog(contact.displayName, "هذا الرقم غير مسجل بالتطبيق.",cleanTargetPhone);
+      }
+    } catch (e) {
+      print("❌ خطأ في المطابقة: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+  void _showInviteDialog(String name, String phoneNumber, String reason) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('دعوة $name'),
+        content: Text('$reason\nهل تود الانتقال إلى واتساب لدعوته لتحميل التطبيق وبدء الشات؟'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              Navigator.pop(context); // إغلاق النافذة
+
+              // استدعاء دالة الواتساب الذكية
+              await ref.watch(chatServiceProvider).sendWhatsAppInvite(
+                phoneNumber: phoneNumber,
+                contactName: name,
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF075E54), // لون الواتساب الأخضر المميز
+              foregroundColor: Colors.white,
+            ),
+            icon: Container(height: 40, width: 40, decoration: BoxDecoration(image: DecorationImage(image: NetworkImage('https://cdn-icons-png.flaticon.com/128/3536/3536445.png'))),), // أيقونة الواتساب
+            label: const Text('دعوة عبر واتساب'),
+          ),
+        ],
       ),
     );
   }

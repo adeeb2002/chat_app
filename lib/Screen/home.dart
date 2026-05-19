@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:ChatApp/Combonant/CustomSearchBar.dart';
 import 'package:ChatApp/Provider/chatProvider.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
@@ -7,9 +6,11 @@ import 'package:ChatApp/Screen/addChatScreen.dart';
 import 'package:ChatApp/Screen/login.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../Notifications/CacheService.dart';
 import '../model/chat.dart';
 import '../model/user.dart';
 import 'chatScreen.dart';
@@ -27,8 +28,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool isConnected = false;
   final searchController = TextEditingController();
   StreamSubscription? connectionSubscription;
-
   String _searchQuery = '';
+  late final AdvancedCacheService _cacheService;
+  bool _isOfflineMode = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -36,79 +38,115 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void initState() {
     super.initState();
-    // ✅ الطريقة الصحيحة لاستدعاء الدوال المستقلة
+
+    _cacheService = AdvancedCacheService();
     _checkUserLoggedIn();
 
-    // 2️⃣ الاستماع للتغييرات في حقل البحث وتحديث الواجهة فوراً
     searchController.addListener(() {
-      setState(() {
-        _searchQuery = searchController.text.trim().toLowerCase();
-      });
+      if (mounted) {
+        setState(() {
+          _searchQuery = searchController.text.trim().toLowerCase();
+        });
+      }
     });
 
-    // مراقبة الاتصال بشكل حي
-    connectionSubscription = InternetConnection().onStatusChange.listen((
-      status,
-    ) {
+    connectionSubscription = InternetConnection().onStatusChange.listen((status) async {
       final hasConnection = status == InternetStatus.connected;
 
-      // تحديث الحالة فقط إذا تغيرت لتجنب Rebuild غير ضروري
       if (isConnected != hasConnection) {
-        setState(() {
-          isConnected = hasConnection;
-        });
+        if (mounted) {
+          setState(() {
+            isConnected = hasConnection;
+          });
+        }
 
         if (isConnected) {
-          // إذا عاد الإنترنت، نحدث البيانات
-          final currentUserEmail = ref.read(appUserEmailProvider);
-          if (currentUserEmail != null) {
-            ref.invalidate(chatsProvider(currentUserEmail));
-          }
+          print('🌐 عودة الاتصال بالإنترنت');
+          await _retryLoadingAfterConnection();
+        } else {
+          print('⚠️ انقطاع الاتصال بالإنترنت');
+          _checkOfflineMode();
         }
       }
     });
+  }
+
+  void _checkOfflineMode() {
+    if (!isConnected && _cacheService.hasCachedData()) {
+      setState(() {
+        _isOfflineMode = true;
+      });
+    } else {
+      setState(() {
+        _isOfflineMode = false;
+      });
+    }
   }
 
   @override
   void dispose() {
     connectionSubscription?.cancel();
     searchController.dispose();
+    _cacheService.dispose();
     super.dispose();
   }
 
+  Future<void> _retryLoadingAfterConnection() async {
+    if (!isConnected) return;
+
+    print('🔄 إعادة تحميل البيانات بعد عودة الاتصال...');
+
+    final currentUserPhone = ref.read(appUserPhoneProvider);
+    final currentIdUser = await ref.read(authServiceProvider).getUserByPhoneLocal();
+
+    if (currentUserPhone != null) {
+      if (currentIdUser?.id != null) {
+        await ref.read(authServiceProvider).updateUserStatus(currentIdUser!.id!, true);
+      }
+
+      ref.invalidate(chatsProvider(currentUserPhone));
+
+      // ✅ إعادة تحميل بيانات المستخدمين أيضاً
+      ref.invalidate(userDataProvider);
+
+      final freshUser = await ref.read(authServiceProvider).getUserByPhone(currentUserPhone);
+      if (freshUser != null && mounted) {
+        ref.read(appUserDataProvider.notifier).state = freshUser;
+      }
+    }
+
+    _checkOfflineMode();
+  }
+
   Future<void> _checkUserLoggedIn() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
       final prefs = await SharedPreferences.getInstance();
+      final phone = prefs.getString('phone');
       final userEmail = prefs.getString('userEmail');
       final userId = prefs.getString('userId');
-      final userName = prefs.getString('userName'); // يفضل حفظ الاسم أيضاً
+      final userName = prefs.getString('userName');
 
-      if (userEmail != null && userId != null && mounted) {
-        // ✅ لا تنتظر getUser hierarchies من السيرفر هنا
-        // قم بتعبئة البيانات الأساسية فوراً من الذاكرة المحلية
+      if (phone != null && userId != null && mounted) {
         final localUser = AppUser(
           id: userId,
+          phone: phone,
           email: userEmail,
-          displayName: userName ?? userEmail.split('@')[0],
-          isOnline: false, // افتراضياً أوفلاين
+          displayName: userName ?? phone,
+          isOnline: isConnected,
         );
 
         ref.read(appUserDataProvider.notifier).state = localUser;
-        ref.read(appUserEmailProvider.notifier).state = userEmail;
+        ref.read(appUserPhoneProvider.notifier).state = phone;
 
-        // تحديث الحالة في السيرفر يتم "في الخلفية" ولا يعطل الدخول
-        if (isConnected) {
-          ref.read(authServiceProvider).updateUserStatus(userId, true);
-        }
-
-        print('✅ تم الدخول السريع (وضع الأوفلاين)');
+        print('✅ تم الدخول السريع بنجاح (حالة الاتصال: ${isConnected ? "متصل" : "غير متصل"})');
       } else {
         _navigateToLogin();
       }
     } catch (e) {
-      print('❌ خطأ: $e');
+      print('❌ خطأ في فحص حالة الدخول: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -128,13 +166,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
     final now = DateTime.now();
 
-    if (date.year == now.year &&
-        date.month == now.month &&
-        date.day == now.day) {
+    if (date.year == now.year && date.month == now.month && date.day == now.day) {
       return DateFormat('h:mm a').format(date);
-    } else if (date.year == now.year &&
-        date.month == now.month &&
-        date.day == now.day - 1) {
+    } else if (date.year == now.year && date.month == now.month && date.day == now.day - 1) {
       return 'أمس';
     } else if (date.year == now.year && date.month == now.month) {
       return DateFormat('d MMM').format(date);
@@ -157,7 +191,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('تسجيل خروج'),
+            child: const Text('تسجيل خروج', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -169,7 +203,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final currentUser = ref.read(appUserDataProvider);
       final authService = ref.read(authServiceProvider);
 
-      if (currentUser?.id != null) {
+      if (currentUser?.id != null && isConnected) {
         await authService.updateUserStatus(currentUser!.id!, false);
       }
 
@@ -178,21 +212,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
 
-      ref.read(appUserDataProvider.notifier).state = null;
-      ref.read(appUserEmailProvider.notifier).state = null;
+      await _cacheService.clearAllCache();
 
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
-        );
-      }
+      ref.read(appUserDataProvider.notifier).state = null;
+      ref.read(appUserPhoneProvider.notifier).state = null;
+
+      _navigateToLogin();
     } catch (e) {
       print('❌ خطأ في تسجيل الخروج: $e');
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('خطأ في تسجيل الخروج: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ في تسجيل الخروج: $e')),
+        );
       }
     }
   }
@@ -202,7 +233,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     super.build(context);
 
     final currentUser = ref.watch(appUserDataProvider);
-    final currentUserEmail = ref.watch(appUserEmailProvider);
+    final currentUserPhone = ref.watch(appUserPhoneProvider);
 
     if (_isLoading) {
       return const Scaffold(
@@ -219,14 +250,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       );
     }
 
-    if (currentUser == null || currentUserEmail == null) {
+    if (currentUser == null || currentUserPhone == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _navigateToLogin();
       });
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final chatsAsync = ref.watch(chatsProvider(currentUserEmail));
+    final chatsAsync = ref.watch(chatsProvider(currentUserPhone));
 
     return Scaffold(
       appBar: AppBar(
@@ -236,17 +267,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             const SizedBox(width: 8),
             const Text(
               'المحادثات',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(width: 10), // مسافة صغيرة تفصل العنوان عن الحالة
-            Text(
-              isConnected ? 'متصل' : 'في انتظار الشبكة...',
-              style: TextStyle(
-                fontSize: 11,
-                color: isConnected ? Colors.greenAccent : Colors.orangeAccent,
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: isConnected ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isConnected ? Icons.wifi : Icons.wifi_off,
+                    size: 14,
+                    color: isConnected ? Colors.greenAccent : Colors.orangeAccent,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    isConnected ? 'متصل' : 'غير متصل',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isConnected ? Colors.greenAccent : Colors.orangeAccent,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -262,7 +308,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               if (value == 'logout') {
                 _logout();
               } else if (value == 'profile') {
-                _showProfileDialog();
+                _showProfileBottomSheet();
               }
             },
             itemBuilder: (context) => [
@@ -272,7 +318,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   children: [
                     Icon(Icons.person, size: 20, color: Colors.black),
                     SizedBox(width: 12),
-                    Text('الملف الشخصي'),
+                    Text('الملف الشخصي', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   ],
                 ),
               ),
@@ -282,10 +328,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   children: [
                     Icon(Icons.logout, size: 20, color: Colors.red),
                     SizedBox(width: 12),
-                    Text(
-                      'تسجيل الخروج',
-                      style: TextStyle(color: Colors.red),
-                    ), // تعديل لون النص ليناسب اللوجو الأحمر
+                    Text('تسجيل الخروج', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
                   ],
                 ),
               ),
@@ -294,19 +337,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ],
       ),
       body: Stack(
-        // الـ Stack هنا فقط للتحكم في شريط الإشعارات العلوي الطائر
         children: [
-          // المحتوى الأساسي مرتب عمودياً بشكل سليم
           Column(
             children: [
-              // 1️⃣ حقل البحث مع هوامش مناسبة
               Padding(
-                padding: const EdgeInsets.only(
-                  top: 12,
-                  left: 12,
-                  right: 12,
-                  bottom: 8,
-                ),
+                padding: const EdgeInsets.only(top: 12, left: 12, right: 12, bottom: 8),
                 child: CustomSearchBar(
                   controller: searchController,
                   onClear: () {
@@ -322,99 +357,73 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ),
               ),
 
-              // 2️⃣ قائمة المحادثات مرنة تأخذ باقي مساحة الشاشة عمودياً
+              if (!isConnected)
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.orange[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.wifi_off, size: 18, color: Colors.orange[700]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'لا يوجد اتصال بالإنترنت، يتم عرض الرسائل المحفوظة فقط',
+                          style: TextStyle(fontSize: 12, color: Colors.orange[700]),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: () async {
-                    ref.invalidate(chatsProvider(currentUserEmail));
+                    if (isConnected) {
+                      ref.invalidate(chatsProvider(currentUserPhone));
+                      ref.invalidate(userDataProvider); // ✅ تحديث بيانات المستخدمين
+                      await _retryLoadingAfterConnection();
+                    } else {
+                      Fluttertoast.showToast(msg: 'لا يوجد اتصال بالإنترنت لتحديث البيانات');
+                    }
                   },
                   child: chatsAsync.when(
                     data: (chats) {
-                      if (chats.isEmpty) return _buildEmptyState(currentUser);
-
-                      // 3️⃣ تصفية القائمة برمجياً بناءً على نص البحث
-                      final filteredChats = chats.where((chat) {
-                        final otherEmail = chat.getOtherParticipant(
-                          currentUserEmail,
-                        );
-
-                        // جلب بيانات المستخدم الآخر من الـ Provider (الاسم المقترن به)
-                        final otherUser = ref
-                            .read(userDataProvider(otherEmail))
-                            .value;
-                        final otherName =
-                            otherUser?.displayName?.toLowerCase() ??
-                            otherEmail.split('@')[0].toLowerCase();
-
-                        // التحقق مما إذا كان الاسم أو الإيميل يحتوي على نص البحث
-                        return otherName.contains(_searchQuery) ||
-                            otherEmail.toLowerCase().contains(_searchQuery);
-                      }).toList();
-
-                      // إذا كانت نتائج البحث فارغة نوضح ذلك للمستخدم
-                      if (filteredChats.isEmpty && _searchQuery.isNotEmpty) {
-                        return const Center(
-                          child: Text(
-                            'لا توجد نتائج مطابقة لبحثك',
-                            style: TextStyle(color: Colors.grey, fontSize: 16),
-                          ),
-                        );
+                      if (chats.isEmpty && !isConnected && _cacheService.hasCachedData()) {
+                        final cachedChats = _cacheService.getCachedChats();
+                        if (cachedChats.isNotEmpty) {
+                          return _buildChatList(cachedChats, currentUserPhone);
+                        }
                       }
 
-                      // عرض القائمة المصفاة فقط
-                      return ListView.builder(
-                        itemCount: filteredChats.length,
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        itemBuilder: (context, index) {
-                          final chat = filteredChats[index];
-                          final otherEmail = chat.getOtherParticipant(
-                            currentUserEmail,
-                          );
-                          return _buildChatItem(
-                            chat,
-                            otherEmail,
-                            currentUserEmail,
-                          );
-                        },
-                      );
+                      if (chats.isEmpty) return _buildEmptyState(currentUser);
+
+                      return _buildChatList(chats, currentUserPhone);
                     },
                     loading: () => isConnected
-                        ? const Center(child: CircularProgressIndicator())
+                        ? const Center(child: CircularProgressIndicator(color: Color(0xFF075E54)))
                         : const Center(
-                            child: Text(
-                              "لا يوجد اتصال، جاري محاولة جلب البيانات محلياً...",
-                            ),
-                          ),
-                    error: (error, stackTrace) =>
-                        _buildErrorState(error.toString()),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.wifi_off, size: 48, color: Colors.grey),
+                          SizedBox(height: 16),
+                          Text("لا يوجد اتصال بالإنترنت"),
+                          SizedBox(height: 8),
+                          Text("جاري عرض البيانات المخزنة...", style: TextStyle(color: Colors.grey)),
+                        ],
+                      ),
+                    ),
+                    error: (error, stackTrace) => _buildErrorState(error.toString()),
                   ),
                 ),
               ),
             ],
           ),
-
-          // 3️⃣ شريط نحيف يعلو كل شيء ويختفي عند توفر الإنترنت دون حجز مساحة من الـ Column
-          if (!isConnected)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                color: Colors.redAccent.withOpacity(
-                  0.9,
-                ), // تم تغيير اللون للأحمر الهادئ ليعطي انطباع التحذير
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: const Text(
-                  'أنت تعمل حالياً في وضع الأوفلاين (يتم العرض من الكاش)',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -430,37 +439,119 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  // ✅ استخدام Consumer بدلاً من FutureBuilder
-  Widget _buildChatItem(Chat chat, String otherEmail, String currentUserEmail) {
-    final userAsync = ref.watch(userDataProvider(otherEmail));
+  Widget _buildChatList(List<Chat> chats, String currentUserPhone) {
+    final filteredChats = chats.where((chat) {
+      final otherPhone = chat.getOtherParticipant(currentUserPhone);
+      // ✅ استخدام FutureProvider بشكل صحيح مع إعادة التحميل
+      final otherUserAsync = ref.watch(userDataProvider(otherPhone));
+      final otherUser = otherUserAsync.value;
+      final otherName = otherUser?.displayName.toLowerCase() ?? otherPhone.toLowerCase();
+      return otherName.contains(_searchQuery) || otherPhone.contains(_searchQuery);
+    }).toList();
+
+    if (filteredChats.isEmpty && _searchQuery.isNotEmpty) {
+      return const Center(
+        child: Text(
+          'لا توجد نتائج مطابقة لبحثك',
+          style: TextStyle(color: Colors.grey, fontSize: 16),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: filteredChats.length,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemBuilder: (context, index) {
+        final chat = filteredChats[index];
+        final otherPhone = chat.getOtherParticipant(currentUserPhone);
+        return _buildChatItem(chat, otherPhone, currentUserPhone);
+      },
+    );
+  }
+
+  Widget _buildChatItem(Chat chat, String otherPhone, String currentUserPhone) {
+    // ✅ مراقبة بيانات المستخدم بشكل صحيح مع إعادة التحميل عند تغيير البيانات
+    final userAsync = ref.watch(userDataProvider(otherPhone));
 
     return userAsync.when(
       data: (user) {
-        final name = user?.displayName ?? otherEmail.split('@')[0];
+        final name = user?.displayName ?? otherPhone;
         final imageUrl = user?.imageUrl;
         return _buildChatTile(
           chat: chat,
           name: name,
-          otherEmail: otherEmail,
+          otherPhone: otherPhone,
           imageUrl: imageUrl,
-          currentUserEmail: currentUserEmail,
+          currentUserPhone: currentUserPhone,
         );
       },
-      loading: () => _buildLoadingChatTile(),
-      error: (error, _) => _buildErrorChatTile(error.toString()),
+      loading: () => _buildLoadingChatTile(chat, otherPhone),
+      error: (error, _) {
+        print('❌ خطأ في تحميل بيانات المستخدم $otherPhone: $error');
+        // ✅ عرض المحادثة حتى لو فشل تحميل البيانات (استخدم رقم الهاتف كاسم مؤقت)
+        return _buildChatTile(
+          chat: chat,
+          name: otherPhone,
+          otherPhone: otherPhone,
+          imageUrl: null,
+          currentUserPhone: currentUserPhone,
+        );
+      },
+    );
+  }
+
+  // ✅ دالة جديدة لعرض عنصر تحميل مع بيانات مؤقتة
+  Widget _buildLoadingChatTile(Chat chat, String otherPhone) {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.grey[100],
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: ListTile(
+          leading: CircleAvatar(
+            radius: 28,
+            backgroundColor: Colors.green[50],
+            child: Text(
+              otherPhone.isNotEmpty ? otherPhone[0].toUpperCase() : '?',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green),
+            ),
+          ),
+          title: Text(otherPhone, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          subtitle: Text(
+            chat.lastMessage.isNotEmpty ? chat.lastMessage : 'جاري التحميل...',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: Text(
+            _formatTime(chat.lastMessageTime),
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+        ),
+      ),
     );
   }
 
   Widget _buildChatTile({
     required Chat chat,
     required String name,
-    required String otherEmail,
+    required String otherPhone,
     required String? imageUrl,
-    required String currentUserEmail,
+    required String currentUserPhone,
   }) {
-    // 1️⃣ جلب عدد الرسائل غير المقروءة من الـ chat model
-    // تأكد من مطابقة اسم المتغير لديك، سأفترض اسمه unreadCount أو نقوم بمثال افتراضي
-    final int unreadCount = chat.unreadCount ?? 0;
+    final String cleanPhoneKey = currentUserPhone.replaceAll('+', 'p');
+
+    int unreadCount = 0;
+    if (chat.unreadCount is int) {
+      unreadCount = chat.unreadCount as int;
+    } else if (chat.unreadCount is Map) {
+      final map = chat.unreadCount as Map;
+      unreadCount = map[cleanPhoneKey] ?? 0;
+    } else {
+      unreadCount = chat.unreadCount ?? 0;
+    }
+
     final bool hasUnread = unreadCount > 0;
 
     return Dismissible(
@@ -494,13 +585,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       onDismissed: (direction) async {
         try {
           final chatService = ref.read(chatServiceProvider);
-          final currentUser = ref.read(appUserDataProvider);
-          final currentUserId = currentUser?.id ?? currentUserEmail;
-
-          await chatService.deleteChatForUser(chat.id, currentUserId);
+          await chatService.deleteChatForUser(chat.id, currentUserPhone);
+          await _cacheService.deleteCachedChat(chat.id);
 
           if (mounted) {
-            ref.invalidate(chatsProvider(currentUserEmail));
+            ref.invalidate(chatsProvider(currentUserPhone));
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('تم حذف المحادثة')),
             );
@@ -510,7 +599,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('خطأ في الحذف: $e')),
             );
-            ref.invalidate(chatsProvider(currentUserEmail));
+            ref.invalidate(chatsProvider(currentUserPhone));
           }
         }
       },
@@ -534,115 +623,97 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) => Text(
                     name[0].toUpperCase(),
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green,
-                    ),
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green),
                   ),
                 ),
               )
                   : Text(
                 name[0].toUpperCase(),
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.green,
-                ),
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green),
               ),
             ),
-            title: Text(
-              name,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
+            title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             subtitle: Text(
               chat.isBlocked ?? false
-                  ? 'هذه المحادثة محظورة'
+                  ? '🔒 هذه المحادثة محظورة'
                   : chat.lastMessage.isNotEmpty
                   ? chat.lastMessage
-                  : 'ابدأ المحادثة',
+                  : '✨ ابدأ المحادثة',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              // جعل لون آخر رسالة أغمق قليلاً إذا كانت غير مقروءة
               style: TextStyle(
                 color: hasUnread ? Colors.black87 : Colors.grey[600],
                 fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
               ),
             ),
-            // 2️⃣ التعديل الجوهري هنا: ترتيب الوقت والعداد عمودياً
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                // الوقت في الأعلى
-                Text(
-                  _formatTime(chat.lastMessageTime),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: hasUnread ? const Color(0xFF075E54) : Colors.grey,
-                    fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
+            trailing: SizedBox(
+              width: 60,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _formatTime(chat.lastMessageTime),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: hasUnread ? const Color(0xFF25D366) : Colors.grey,
+                      fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 5), // مسافة بسيطة بين الوقت والعداد
-
-                // العداد الدائري يظهر فقط إذا كان هناك رسائل غير مقروءة
-                if (hasUnread)
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF075E54), // اللون الأخضر الخاص بالواتساب
-                      shape: BoxShape.circle,
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: 20,
-                      minHeight: 20,
-                    ),
-                    child: Text(
-                      '$unreadCount',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
+                  const SizedBox(height: 5),
+                  if (hasUnread)
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF25D366),
+                        shape: BoxShape.circle,
                       ),
+                      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                      child: Center(
+                        child: Text(
+                          '$unreadCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    const SizedBox(width: 20, height: 20),
+                ],
+              ),
+            ),
+            onTap: () async {
+              if (isConnected) {
+                try {
+                  final chatService = ref.read(chatServiceProvider);
+                  await chatService.db
+                      .ref('chats')
+                      .child(chat.id)
+                      .child('unreadCount')
+                      .update({cleanPhoneKey: 0});
+                } catch (e) {
+                  print('❌ فشل تصفير العداد: $e');
+                }
+              }
+
+              if (context.mounted) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatScreen(
+                      chat: chat,
+                      receiverPhone: otherPhone,
+                      receiverName: name,
                     ),
                   ),
-              ],
-            ),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ChatScreen(
-                    chat: chat,
-                    receiverEmail: otherEmail,
-                    receiverName: name,
-                  ),
-                ),
-              );
+                );
+              }
             },
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLoadingChatTile() {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.grey[100],
-          borderRadius: BorderRadius.circular(15),
-        ),
-        child: const ListTile(
-          leading: CircleAvatar(
-            radius: 28,
-            backgroundColor: Colors.grey,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-          title: Text('جاري التحميل...'),
-          subtitle: Text('...'),
         ),
       ),
     );
@@ -677,35 +748,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           Container(
             width: 120,
             height: 120,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.green[50],
-            ),
-            child: const Icon(
-              Icons.chat_bubble_outline,
-              size: 60,
-              color: Colors.green,
-            ),
+            decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.green[50]),
+            child: const Icon(Icons.chat_bubble_outline, size: 60, color: Colors.green),
           ),
           const SizedBox(height: 24),
           Text(
-            'مرحباً ${currentUser.displayName}',
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF075E54),
-            ),
+            'مرحباً ${currentUser.displayName ?? currentUser.phone}',
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF075E54)),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'لا توجد محادثات بعد',
-            style: TextStyle(color: Colors.grey, fontSize: 16),
-          ),
+          const Text('لا توجد محادثات بعد', style: TextStyle(color: Colors.grey, fontSize: 16)),
           const SizedBox(height: 8),
-          const Text(
-            'ابدأ محادثة جديدة الآن',
-            style: TextStyle(color: Colors.grey, fontSize: 14),
-          ),
+          const Text('ابدأ محادثة جديدة الآن', style: TextStyle(color: Colors.grey, fontSize: 14)),
           const SizedBox(height: 32),
           ElevatedButton.icon(
             onPressed: () => Navigator.push(
@@ -718,9 +772,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               backgroundColor: const Color(0xFF075E54),
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(25),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
             ),
           ),
         ],
@@ -735,25 +787,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         children: [
           const Icon(Icons.error_outline, size: 64, color: Colors.red),
           const SizedBox(height: 16),
-          const Text(
-            'حدث خطأ',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
+          const Text('حدث خطأ', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
-              error,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.grey),
-            ),
+            child: Text(error, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
             onPressed: () {
-              final currentUserEmail = ref.read(appUserEmailProvider);
-              if (currentUserEmail != null) {
-                ref.invalidate(chatsProvider(currentUserEmail));
+              final currentUserPhone = ref.read(appUserPhoneProvider);
+              if (currentUserPhone != null) {
+                ref.invalidate(chatsProvider(currentUserPhone));
+                ref.invalidate(userDataProvider);
               }
             },
             icon: const Icon(Icons.refresh),
@@ -765,86 +811,314 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  void _showSearchDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('البحث عن محادثة'),
-        content: TextField(
-          decoration: const InputDecoration(
-            hintText: 'أدخل اسم المستخدم أو البريد الإلكتروني',
-            prefixIcon: Icon(Icons.search),
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (value) {
-            // TODO: تنفيذ البحث
-            Navigator.pop(context);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('إلغاء'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showProfileDialog() {
+  // ✅ نافذة الملف الشخصي
+  void _showProfileBottomSheet() {
     final currentUser = ref.read(appUserDataProvider);
     if (currentUser == null) return;
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('الملف الشخصي'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircleAvatar(
-              radius: 50,
-              backgroundColor: Colors.green[100],
-              child: Text(
-                currentUser.displayName[0].toUpperCase(),
-                style: const TextStyle(fontSize: 40, color: Colors.green),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(30),
+              topRight: Radius.circular(30),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              currentUser.displayName,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(currentUser.email, style: const TextStyle(color: Colors.grey)),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: currentUser.isOnline ? Colors.green : Colors.grey,
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.green.withOpacity(0.3),
+                            blurRadius: 5,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: CircleAvatar(
+                        radius: 60,
+                        backgroundColor: const Color(0xFF075E54).withOpacity(0.1),
+                        child: Text(
+                          currentUser.displayName.isNotEmpty
+                              ? currentUser.displayName[0].toUpperCase()
+                              : 'U',
+                          style: const TextStyle(
+                            fontSize: 48,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF075E54),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      currentUser.displayName,
+                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        currentUser.phone ?? 'رقم الهاتف غير متوفر',
+                        style: TextStyle(fontSize: 14, color: Colors.grey[700], fontFamily: 'monospace'),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Chip(
+                      avatar: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isConnected ? Colors.green : Colors.grey,
+                        ),
+                      ),
+                      label: Text(
+                        isConnected ? 'متصل الآن' : 'غير متصل',
+                        style: TextStyle(
+                          color: isConnected ? Colors.green[700] : Colors.grey[700],
+                        ),
+                      ),
+                      backgroundColor: isConnected
+                          ? Colors.green.withOpacity(0.1)
+                          : Colors.grey.withOpacity(0.1),
+                    ),
+                    const SizedBox(height: 32),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _showEditProfileBottomSheet();
+                            },
+                            icon: const Icon(Icons.edit, size: 20),
+                            label: const Text('تعديل', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.green,
+                              side: const BorderSide(color: Colors.green),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () => Navigator.pop(context),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF075E54),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: const Text('إغلاق', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ✅ نافذة تعديل الملف الشخصي
+  void _showEditProfileBottomSheet() {
+    final currentUser = ref.read(appUserDataProvider);
+    if (currentUser == null) return;
+
+    final nameController = TextEditingController(text: currentUser.displayName);
+    final emailController = TextEditingController(text: currentUser.email ?? '');
+    bool isSaving = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(25),
+                    topRight: Radius.circular(25),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  currentUser.isOnline ? 'متصل الآن' : 'غير متصل',
-                  style: const TextStyle(fontSize: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 50,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[300],
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'تعديل الملف الشخصي',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF075E54),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: nameController,
+                      decoration: InputDecoration(
+                        labelText: 'اسم المستخدم',
+                        labelStyle: const TextStyle(color: Color(0xFF075E54)),
+                        hintText: 'أدخل اسمك الجديد',
+                        prefixIcon: const Icon(Icons.person, color: Color(0xFF075E54)),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFF075E54), width: 2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: InputDecoration(
+                        labelText: 'البريد الإلكتروني',
+                        labelStyle: const TextStyle(color: Color(0xFF075E54)),
+                        hintText: 'example@email.com',
+                        prefixIcon: const Icon(Icons.email, color: Color(0xFF075E54)),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFF075E54), width: 2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: isSaving ? null : () => Navigator.pop(context),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              side: const BorderSide(color: Colors.grey),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: const Text('إلغاء', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: isSaving ? null : () async {
+                              final newName = nameController.text.trim();
+                              final newEmail = emailController.text.trim();
+
+                              if (newName.isEmpty) {
+                                Fluttertoast.showToast(msg: 'الاسم لا يمكن أن يكون فارغاً');
+                                return;
+                              }
+                              if (newEmail.isEmpty) {
+                                Fluttertoast.showToast(msg: 'البريد الإلكتروني لا يمكن أن يكون فارغاً');
+                                return;
+                              }
+
+                              setModalState(() => isSaving = true);
+
+                              try {
+                                final database = ref.read(firebaseDatabaseProvider);
+                                await database.ref('users').child(currentUser.id!).update({
+                                  'email': newEmail,
+                                  'displayName': newName,
+                                });
+
+                                final prefs = await SharedPreferences.getInstance();
+                                await prefs.setString('userEmail', newEmail);
+                                await prefs.setString('userName', newName);
+
+                                ref.read(appUserDataProvider.notifier).state = currentUser.copyWith(
+                                  displayName: newName,
+                                  email: newEmail,
+                                );
+
+                                Fluttertoast.showToast(msg: 'تم تحديث البيانات بنجاح');
+
+                                if (context.mounted) {
+                                  Navigator.pop(context);
+                                }
+                              } catch (e) {
+                                print('❌ خطأ أثناء تحديث البيانات: $e');
+                                Fluttertoast.showToast(msg: 'حدث خطأ أثناء حفظ البيانات');
+                              } finally {
+                                if (context.mounted) {
+                                  setModalState(() => isSaving = false);
+                                }
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF075E54),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: isSaving
+                                ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            )
+                                : const Text('حفظ', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                  ],
                 ),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('إغلاق'),
-          ),
-        ],
-      ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

@@ -1,11 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
+import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 
+import '../Notifications/CacheService.dart';
 import '../Notifications/PendingNotificationsService.dart';
 import '../Notifications/notifications.dart';
 import '../model/Message.dart';
@@ -20,34 +22,88 @@ final messageServiceProvider = Provider<MessageService>((ref) {
 });
 
 final messagesProvider = StreamProvider.family<List<Message>, String>((ref, chatId) {
-  final db = ref.watch(firebaseDatabaseProvider);
-  final currentUserEmail = ref.watch(currentUserEmailProvider);
+  final db = FirebaseDatabase.instance;
+  final cacheService = AdvancedCacheService();
+  final currentUserPhone = ref.watch(appUserPhoneProvider);
 
-  return db.ref('chats').child(chatId).child('messages').limitToLast(40).onValue.map((event) {
-    final data = event.snapshot.value as Map<dynamic, dynamic>? ?? {};
+  final controller = StreamController<List<Message>>.broadcast();
 
-    final messages = data.entries.map((entry) {
-      return Message.fromMap(entry.value as Map<dynamic, dynamic>);
-    }).toList();
-
-    messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
-    if (currentUserEmail != null && messages.isNotEmpty) {
-      _markUnreadMessages(db, chatId, currentUserEmail, messages);
+  // ✅ 1. عرض الرسائل المخزنة محلياً فوراً
+  Future.delayed(Duration.zero, () async {
+    final cachedMessages = await _loadCachedMessages(chatId);
+    if (cachedMessages.isNotEmpty && !controller.isClosed) {
+      print('📱 عرض ${cachedMessages.length} رسالة من الكاش المحلي للمحادثة $chatId');
+      controller.add(cachedMessages);
     }
-
-    return messages;
   });
+
+  // ✅ 2. إذا كان هناك اتصال، استمع للرسائل الجديدة
+  final isOnline = cacheService.isOnline;
+
+  if (isOnline) {
+    final listener = db.ref('chats').child(chatId).child('messages').onValue.listen((event) {
+      final data = event.snapshot.value as Map<dynamic, dynamic>? ?? {};
+
+      final messages = data.entries.map((entry) {
+        return Message.fromMap(entry.value as Map<dynamic, dynamic>);
+      }).toList();
+
+      messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+      // ✅ حفظ في الكاش
+      _saveMessagesToCache(chatId, messages);
+
+      if (!controller.isClosed) {
+        controller.add(messages);
+      }
+    });
+
+    ref.onDispose(() {
+      listener.cancel();
+      controller.close();
+    });
+  } else {
+    // ✅ إذا كان أوفلاين، أغلق الـ Stream بعد عرض الكاش
+    print('⚠️ وضع الأوفلاين - عرض الرسائل المخزنة فقط للمحادثة $chatId');
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!controller.isClosed) {
+        controller.close();
+      }
+    });
+  }
+
+  return controller.stream;
 });
+
+// ✅ دالة لجلب الرسائل من الكاش
+Future<List<Message>> _loadCachedMessages(String chatId) async {
+  try {
+    final cacheService = AdvancedCacheService();
+    return await cacheService.getCachedMessages(chatId);
+  } catch (e) {
+    print('❌ خطأ في جلب الرسائل من الكاش: $e');
+    return [];
+  }
+}
+
+// ✅ دالة لحفظ الرسائل في الكاش
+Future<void> _saveMessagesToCache(String chatId, List<Message> messages) async {
+  try {
+    final cacheService = AdvancedCacheService();
+    await cacheService.saveMessages(chatId, messages);
+  } catch (e) {
+    print('❌ خطأ في حفظ الرسائل في الكاش: $e');
+  }
+}
 
 void _markUnreadMessages(
     FirebaseDatabase db,
     String chatId,
-    String currentUserEmail,
+    String currentUserPhone,
     List<Message> messages,
     ) {
   final unreadMessages = messages.where((msg) =>
-  msg.resevUser == currentUserEmail && !msg.isRead
+  msg.resevUser == currentUserPhone && !msg.isRead
   ).toList();
 
   if (unreadMessages.isNotEmpty) {
@@ -58,42 +114,70 @@ void _markUnreadMessages(
   }
 }
 
-final currentUserEmailProvider = StateProvider<String?>((ref) => null);
+final currentUserPhoneProvider = StateProvider<String?>((ref) => null);
 
 class MessageService {
   final FirebaseDatabase db;
 
   MessageService(this.db);
 
-  Future<void> sendMassege(Message massege) async {
+
+  Future<void> sendMessage(Message message,String messageId) async {
+    if (!message.isValid) {
+      throw Exception('بيانات الرسالة غير صالحة');
+    }
+
     try {
-      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      print('📨 بدء إرسال الرسالة...');
-      print('Sender: ${massege.senderUser}');
-      print('Receiver: ${massege.resevUser}');
-      print('Body: ${massege.body}');
 
-      // 1. إنشاء مرجع جديد للرسالة
-      final chatRef = db.ref('chats').child(massege.chatId).child('messages');
+
+
+      // 1️⃣ أولاً: رفع الرسالة الجديدة داخل عقدة الـ messages
+      final chatRef = db.ref('chats').child(message.chatId).child('messages');
       final newMessageRef = chatRef.push();
-      final messageId = newMessageRef.key!;
 
-      print('Message ID: $messageId');
+      final messageWithId = message.toMap();
+      messageWithId['id'] = newMessageRef.key;
 
-      final messageWithId = massege.copyWith(id: messageId);
+      await newMessageRef.set(messageWithId);
 
-      // 2. حفظ الرسالة في Firebase
-      await newMessageRef.set(messageWithId.toMap());
-      print('✅ تم حفظ الرسالة في Firebase');
+      // 2️⃣ ثانياً: تنظيف رقم هاتف المستقبل لتحديث العداد الخاص به
+      // (لأن الرسائل غير المقروءة تزيد عند الشخص الذي يستقبل الرسالة وليس المرسل)
+      final String receiverCleanKey = message.resevUser.replaceAll('+', 'p');
 
-      // 3. تحديث آخر رسالة في المحادثة
-      await db.ref('chats').child(massege.chatId).update({
-        'lastMessage': massege.body,
-        'lastMessageTime': massege.timestamp,
-        'lastMessageSender': massege.senderUser,
-        'lastMessageId': messageId,
+      // 3️⃣ ثالثاً: استخدام Transaction لتحديث بيانات المحادثة وزيادة العداد بأمان
+      final chatMainRef = db.ref('chats').child(message.chatId);
+
+      await chatMainRef.runTransaction((Object? chatData) {
+        if (chatData == null) {
+          return Transaction.abort();
+        }
+
+        // تحويل البيانات الحالية للمحادثة إلى Map للتعديل عليها
+        final Map<String, dynamic> chatMap = Map<String, dynamic>.from(chatData as Map);
+
+        // تحديث البيانات الأساسية لآخر رسالة
+        chatMap['lastMessage'] = message.body;
+        chatMap['lastMessageTime'] = message.timestamp;
+        chatMap['lastMessageSender'] = message.senderUser;
+        chatMap['updatedAt'] = message.timestamp;
+
+        // تهيئة خريطة العدادات إذا لم تكن موجودة مسبقاً
+        if (chatMap['unreadCount'] == null) {
+          chatMap['unreadCount'] = <String, dynamic>{};
+        }
+
+        final Map<String, dynamic> unreadMap = Map<String, dynamic>.from(chatMap['unreadCount']);
+
+        // جلب العداد الحالي للمستقبل وزيادته بـ 1
+        final int currentUnread = unreadMap[receiverCleanKey] ?? 0;
+        unreadMap[receiverCleanKey] = currentUnread + 1;
+
+        // إعادة تعيين الخريطة المحدثة داخل بيانات المحادثة
+        chatMap['unreadCount'] = unreadMap;
+
+        // إرجاع البيانات المحدثة ليتم حفظها في Firebase
+        return Transaction.success(chatMap);
       });
-      print('✅ تم تحديث آخر رسالة في المحادثة');
 
       // 4. فحص الاتصال
       print('🔍 فحص حالة الاتصال...');
@@ -115,16 +199,13 @@ class MessageService {
       if (isConnected) {
         print('📤 محاولة إرسال الإشعار فوراً...');
         try {
-          final senderName = massege.senderUser.split('@').first;
+          print('🎯 المستلم: ${message.resevUser}');
 
-          print('🎯 المستلم: ${massege.resevUser}');
-          print('👤 المرسل: $senderName');
-
-          /*final success = await NotificationService().sendMessageNotification(
-            targetEmail: massege.resevUser,
-            senderName: senderName,
-            messageBody: massege.body,
-            chatId: massege.chatId,
+          final success = await NotificationService().sendMessageNotification(
+            targetPhone: message.resevUser,
+            senderName: message.senderUser,
+            messageBody: message.body,
+            chatId: message.chatId,
             messageId: messageId,
           );
 
@@ -135,23 +216,23 @@ class MessageService {
             print('✅✅✅ تم إرسال الإشعار بنجاح ✅✅✅');
           } else {
             print('⚠️ فشل إرسال الإشعار، إضافة للقائمة...');
-            await _addToPendingQueue(massege, messageId);
+            await _addToPendingQueue(message, messageId);
           }
-          */
+
 
         } catch (e) {
           print('❌ خطأ في إرسال الإشعار: $e');
           print('📝 إضافة الإشعار إلى قائمة الانتظار...');
-          await _addToPendingQueue(massege, messageId);
+          await _addToPendingQueue(message, messageId);
         }
       } else {
         print('📵 لا يوجد اتصال، إضافة الإشعار إلى قائمة الانتظار...');
-        await _addToPendingQueue(massege, messageId);
+        await _addToPendingQueue(message, messageId);
       }
 
-      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      print('✅ تم إرسال الرسالة وزيادة عداد الرسائل غير المقروءة للمستقبل');
     } catch (e) {
-      print('❌❌❌ خطأ فادح في معالجة الرسالة: $e');
+      print('❌ خطأ في إرسال الرسالة وتحديث العداد: $e');
       rethrow;
     }
   }
@@ -163,8 +244,8 @@ class MessageService {
       await PendingNotificationsService().addPendingNotification(
         chatId: message.chatId,
         messageId: messageId,
-        senderEmail: message.senderUser,
-        receiverEmail: message.resevUser,
+        senderPhone: message.senderUser,
+        receiverPhone: message.resevUser,
         messageBody: message.body,
         timestamp: message.timestamp,
       );
@@ -249,8 +330,9 @@ class MessageService {
     }
   }
 
-  Future<void> markMessagesAsRead(String chatId, String userEmail) async {
+  Future<void> markMessagesAsRead(String chatId, String userPhone) async {
     try {
+      final chatRef= db.ref('chats').child(chatId);
       final messagesRef = db.ref('chats').child(chatId).child('messages');
       final snapshot = await messagesRef.get();
 
@@ -261,7 +343,7 @@ class MessageService {
 
       messages.forEach((key, value) {
         final messageData = Map<String, dynamic>.from(value);
-        if (messageData['resevUser'] == userEmail &&
+        if (messageData['resevUser'] == userPhone &&
             messageData['isRead'] != true) {
           updates['$key/isRead'] = true;
         }
@@ -270,6 +352,12 @@ class MessageService {
       if (updates.isNotEmpty) {
         await messagesRef.update(updates);
       }
+
+
+      // تصفير عداد الرسائل غير المقروءة لهذا المستخدم بالتحديد في السيرفر
+      final cleanUserPhone = userPhone.replaceAll('+', '_p_');
+      await chatRef.child('unreadCount').child(cleanUserPhone).set(0);
+
 
     } catch (e) {
       print('❌ خطأ في تحديث حالة القراءة: $e');

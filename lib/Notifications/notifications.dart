@@ -65,7 +65,7 @@ class NotificationService {
   }
 
   /// ✅ تسجيل المستخدم (مع فحص التهيئة)
-  Future<void> loginUser(String userEmail) async {
+  Future<void> loginUser(String phoneNumber) async {
     try {
       // ✅ تأكد من التهيئة أولاً
       if (!_isInitialized) {
@@ -76,18 +76,18 @@ class NotificationService {
         await Future.delayed(const Duration(milliseconds: 500));
       }
 
-      print('👤 تسجيل المستخدم: $userEmail');
+      print('👤 تسجيل المستخدم: $phoneNumber');
 
-      final cleanEmail = userEmail.toLowerCase().trim();
+      final cleanPhone = phoneNumber.trim();
 
       // تسجيل الدخول
-      await OneSignal.login(cleanEmail);
+      await OneSignal.login(cleanPhone);
 
       // ✅ انتظر قليلاً للتأكد من اكتمال التسجيل
       await Future.delayed(const Duration(milliseconds: 300));
 
       // تعيين Alias إضافي
-      OneSignal.User.addAlias('email', cleanEmail);
+      OneSignal.User.addAlias('email', cleanPhone);
 
       // الحصول على OneSignal ID
       final osId = OneSignal.User.pushSubscription.id;
@@ -101,9 +101,10 @@ class NotificationService {
         print('🔄 محاولة إعادة التسجيل...');
         await Future.delayed(const Duration(seconds: 1));
 
-        final cleanEmail = userEmail.toLowerCase().trim();
-        await OneSignal.login(cleanEmail);
-        OneSignal.User.addAlias('email', cleanEmail);
+        final cleanPhone = phoneNumber.trim();
+
+        await OneSignal.login(cleanPhone);
+        OneSignal.User.addAlias('email', cleanPhone);
 
         print('✅ نجح التسجيل في المحاولة الثانية');
       } catch (retryError) {
@@ -128,16 +129,16 @@ class NotificationService {
   }
 
   /// ✅ إرسال إشعار
-  Future<bool> sendNotification(NotificationPayload payload, String targetEmail) async {
+  Future<bool> sendNotification(NotificationPayload payload, String targetPhone) async {
     try {
       print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       print('📤 إرسال إشعار...');
-      print('🎯 المستلم: $targetEmail');
+      print('🎯 المستلم: $targetPhone');
       print('📱 App ID: $_appId');
       print('🔐 REST API Key (أول 20 حرف): ${_restApiKey.substring(0, 20)}...');
       print('📦 النوع: ${payload.type.name}');
 
-      final cleanEmail = targetEmail.toLowerCase().trim();
+      final cleanPhone = targetPhone.trim();
 
       final response = await http.post(
         Uri.parse('https://api.onesignal.com/notifications'),
@@ -148,7 +149,7 @@ class NotificationService {
         body: json.encode({
           'app_id': _appId,
           // التعديل هنا: استخدام include_external_user_ids مباشرة وهي الأضمن والأدق لـ API الإرسال المباشر
-          'include_external_user_ids': [cleanEmail],
+          'include_external_user_ids': [cleanPhone],
           'headings': {'en': payload.title, 'ar': payload.title},
           'contents': {'en': payload.body, 'ar': payload.body},
           'data': payload.toDataMap(),
@@ -200,7 +201,7 @@ class NotificationService {
 
   /// ✅ إرسال إشعار رسالة
   Future<bool> sendMessageNotification({
-    required String targetEmail,
+    required String targetPhone,
     required String senderName,
     required String messageBody,
     required String chatId,
@@ -215,6 +216,6 @@ class NotificationService {
       messageId: messageId,
     );
 
-    return await sendNotification(payload, targetEmail);
+    return await sendNotification(payload, targetPhone);
   }
 }
