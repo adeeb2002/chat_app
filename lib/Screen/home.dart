@@ -1066,7 +1066,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               setModalState(() => isSaving = true);
 
                               try {
-                                final database = ref.read(firebaseDatabaseProvider);
+                                final database = ref.read(chatDatabaseProvider);
                                 await database.ref('users').child(currentUser.id!).update({
                                   'email': newEmail,
                                   'displayName': newName,

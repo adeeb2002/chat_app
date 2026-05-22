@@ -12,12 +12,16 @@ import '../Notifications/PendingNotificationsService.dart';
 import '../Notifications/notifications.dart';
 import '../model/Message.dart';
 
-final firebaseDatabaseProvider = Provider<FirebaseDatabase>((ref) {
+final messageDatabaseProvider = Provider<FirebaseDatabase>((ref) {
   return FirebaseDatabase.instance;
 });
+/*
+final optimisticMessagesProvider = StateProvider.family<List<Message>, String>((ref, chatId) {
+  return [];
+});*/
 
 final messageServiceProvider = Provider<MessageService>((ref) {
-  final db = ref.watch(firebaseDatabaseProvider);
+  final db = ref.watch(messageDatabaseProvider);
   return MessageService(db);
 });
 

@@ -12,7 +12,7 @@ import '../model/Message.dart';
 var unreadCount = 0;
 
 // Provider لقاعدة البيانات
-final firebaseDatabaseProvider = Provider<FirebaseDatabase>((ref) {
+final chatDatabaseProvider = Provider<FirebaseDatabase>((ref) {
   return FirebaseDatabase.instance;
 });
 
@@ -25,13 +25,13 @@ final cacheServiceProvider = Provider<AdvancedCacheService>((ref) {
 });
 // Provider لخدمة المحادثات
 final chatServiceProvider = Provider<ChatService>((ref) {
-  final db = ref.watch(firebaseDatabaseProvider);
+  final db = ref.watch(chatDatabaseProvider);
   return ChatService(db);
 });
 
 // ✅ Provider لمراقبة حالة الحظر في الوقت الفعلي
 final chatBlockStatusProvider = StreamProvider.family<Map<String, dynamic>?, String>((ref, chatId) {
-  final db = ref.watch(firebaseDatabaseProvider);
+  final db = ref.watch(chatDatabaseProvider);
 
   final controller = StreamController<Map<String, dynamic>?>.broadcast();
 
