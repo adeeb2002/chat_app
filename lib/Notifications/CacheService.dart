@@ -33,14 +33,15 @@ class AdvancedCacheService {
 
   // ✅ مراقبة حالة الإنترنت
   void _monitorConnectivity() {
-    _connectivitySubscription = _connectivity.onConnectivityChanged.listen((result) {
-      _isOnline = !result.contains(ConnectivityResult.none);
-      print('🌐 Network status: ${_isOnline ? "Online" : "Offline"}');
+    _connectivitySubscription =
+        _connectivity.onConnectivityChanged.listen((result) {
+          _isOnline = !result.contains(ConnectivityResult.none);
+          print('🌐 Network status: ${_isOnline ? "Online" : "Offline"}');
 
-      if (_isOnline) {
-        _syncPendingChanges();
-      }
-    });
+          if (_isOnline) {
+            _syncPendingChanges();
+          }
+        });
   }
 
   // ✅ مزامنة التغييرات المعلقة
@@ -149,7 +150,8 @@ class AdvancedCacheService {
           .toList();
 
       final results = allChats.where((chat) {
-        return chat.lastMessage?.toLowerCase().contains(query.toLowerCase()) ?? false;
+        return chat.lastMessage?.toLowerCase().contains(query.toLowerCase()) ??
+            false;
       }).toList();
 
       return results;
@@ -211,90 +213,123 @@ class AdvancedCacheService {
 
   Chat _hiveChatToChat(HiveChat hiveChat) {
     return Chat(
-      id: hiveChat.id,
-      participants: hiveChat.participants,
-      lastMessage: hiveChat.lastMessage,
-      lastMessageTime: hiveChat.lastMessageTime,
-      lastMessageSender: hiveChat.lastMessageSender,
-      createdAt: hiveChat.createdAt,
-      updatedAt: hiveChat.updatedAt,
-      deletedFor: hiveChat.deletedFor,
-      clearedFor: hiveChat.clearedFor,
-      isBlocked: hiveChat.isBlocked ?? false,
-      blockedBy: hiveChat.blockedBy,
-      isDeletedChatForYou: false
+        id: hiveChat.id,
+        participants: hiveChat.participants,
+        lastMessage: hiveChat.lastMessage,
+        lastMessageTime: hiveChat.lastMessageTime,
+        lastMessageSender: hiveChat.lastMessageSender,
+        createdAt: hiveChat.createdAt,
+        updatedAt: hiveChat.updatedAt,
+        deletedFor: hiveChat.deletedFor,
+        clearedFor: hiveChat.clearedFor,
+        isBlocked: hiveChat.isBlocked ?? false,
+        blockedBy: hiveChat.blockedBy,
+        isDeletedChatForYou: false
     );
   }
-  // ✅ حفظ رسائل محادثة في الكاش
+
+  // ✅ حفظ آخر 50 رسالة فقط (لتجنب تراكم البيانات)
   Future<void> saveMessages(String chatId, List<Message> messages) async {
     try {
       final box = await Hive.openBox<HiveMessage>('messages_$chatId');
       await box.clear();
 
-      for (var message in messages) {
-        final hiveMessage = HiveMessage(
-          id: message.id,
-          senderUser: message.senderUser,
-          resevUser: message.resevUser,
-          body: message.body,
-          chatId: message.chatId,
-          timestamp: message.timestamp,
-          isRead: message.isRead,
-          isDeleted: message.isDeleted,
-          isSynced: true,
-          editedAt: message.editedAt,
-        );
+      // ✅ حفظ آخر 50 رسالة فقط
+      final lastMessages = messages.length > 50
+          ? messages.sublist(messages.length - 50)
+          : messages;
+
+      for (var message in lastMessages) {
+        final hiveMessage = HiveMessage.fromMessage(message);
         await box.put(message.id, hiveMessage);
       }
 
-      print('✅ تم حفظ ${messages.length} رسالة في الكاش للمحادثة $chatId');
+      print('✅ تم حفظ ${lastMessages.length} رسالة في الكاش للمحادثة $chatId');
     } catch (e) {
-      print('❌ خطأ في حفظ الرسائل في الكاش: $e');
+      print('❌ خطأ في حفظ الرسائل: $e');
     }
   }
 
-  // ✅ جلب رسائل محادثة من الكاش
-  Future<List<Message>> getCachedMessages(String chatId) async {
-    try {
-      final boxExists = await Hive.boxExists('messages_$chatId');
-      if (!boxExists) return [];
+    // ✅ جلب رسائل محادثة من الكاش
+    Future<List<Message>> getCachedMessages(String chatId) async {
+      try {
+        final boxExists = await Hive.boxExists('messages_$chatId');
+        if (!boxExists) return [];
 
-      final box = await Hive.openBox<HiveMessage>('messages_$chatId');
-      final messages = box.values.map((hiveMsg) => Message(
-        id: hiveMsg.id,
-        senderUser: hiveMsg.senderUser,
-        resevUser: hiveMsg.resevUser,
-        body: hiveMsg.body,
-        chatId: hiveMsg.chatId,
-        timestamp: hiveMsg.timestamp,
-        isRead: hiveMsg.isRead,
-        isDeleted: hiveMsg.isDeleted,
-        isSynced: hiveMsg.isSynced,
-        editedAt: hiveMsg.editedAt,
-      )).toList();
-
-      messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      print('📦 تم جلب ${messages.length} رسالة من الكاش للمحادثة $chatId');
-      return messages;
-    } catch (e) {
-      print('❌ خطأ في جلب الرسائل من الكاش: $e');
-      return [];
-    }
-  }
-
-  // ✅ حذف رسائل محادثة من الكاش
-  Future<void> deleteCachedMessages(String chatId) async {
-    try {
-      final boxExists = await Hive.boxExists('messages_$chatId');
-      if (boxExists) {
         final box = await Hive.openBox<HiveMessage>('messages_$chatId');
-        await box.clear();
-        await box.close();
-        print('✅ تم حذف رسائل المحادثة $chatId من الكاش');
+        final messages = box.values.map((hiveMsg) =>
+            Message(
+              id: hiveMsg.id,
+              senderUser: hiveMsg.senderUser,
+              resevUser: hiveMsg.resevUser,
+              body: hiveMsg.body,
+              chatId: hiveMsg.chatId,
+              timestamp: hiveMsg.timestamp,
+              isRead: hiveMsg.isRead,
+              isDeleted: hiveMsg.isDeleted,
+              isSynced: hiveMsg.isSynced,
+              editedAt: hiveMsg.editedAt,
+            )).toList();
+
+        messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        print('📦 تم جلب ${messages.length} رسالة من الكاش للمحادثة $chatId');
+        return messages;
+      } catch (e) {
+        print('❌ خطأ في جلب الرسائل من الكاش: $e');
+        return [];
       }
-    } catch (e) {
-      print('❌ خطأ في حذف رسائل المحادثة من الكاش: $e');
     }
-  }
+
+    // ✅ حذف رسائل محادثة من الكاش
+    Future<void> deleteCachedMessages(String chatId) async {
+      try {
+        final boxExists = await Hive.boxExists('messages_$chatId');
+        if (boxExists) {
+          final box = await Hive.openBox<HiveMessage>('messages_$chatId');
+          await box.clear();
+          await box.close();
+          print('✅ تم حذف رسائل المحادثة $chatId من الكاش');
+        }
+      } catch (e) {
+        print('❌ خطأ في حذف رسائل المحادثة من الكاش: $e');
+      }
+    } // ✅ تحديث رسالة في الكاش
+    Future<void> updateMessageInCache(String chatId, String messageId,
+        String newBody, int editedAt) async {
+      try {
+        final box = await Hive.openBox<HiveMessage>('messages_$chatId');
+        final message = box.get(messageId);
+
+        if (message != null) {
+          final updatedMessage = message.copyWith(
+            body: newBody,
+            editedAt: editedAt.toString(),
+          );
+          await box.put(messageId, updatedMessage);
+          print('✅ تم تحديث الرسالة في الكاش');
+        }
+      } catch (e) {
+        print('❌ خطأ في تحديث الرسالة في الكاش: $e');
+      }
+    }
+
+// ✅ حذف رسالة من الكاش
+    Future<void> deleteMessageFromCache(String chatId, String messageId) async {
+      try {
+        final box = await Hive.openBox<HiveMessage>('messages_$chatId');
+        final message = box.get(messageId);
+
+        if (message != null) {
+          final updatedMessage = message.copyWith(
+            isDeleted: true,
+            body: 'تم حذف هذه الرسالة',
+          );
+          await box.put(messageId, updatedMessage);
+          print('✅ تم تحديث حالة الحذف في الكاش');
+        }
+      } catch (e) {
+        print('❌ خطأ في حذف الرسالة من الكاش: $e');
+      }
+    }
 
 }

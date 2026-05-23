@@ -1,15 +1,16 @@
 import 'dart:async';
 
 import 'package:ChatApp/Provider/userProvide.dart';
+import 'package:ChatApp/Screen/SplashScreen.dart';
 import 'package:ChatApp/Screen/home.dart';
 import 'package:ChatApp/Screen/login.dart';
-import 'package:ChatApp/serives/firebase_options.dart';
+import 'package:ChatApp/hiveModle/HiveMessage.dart';
+import 'package:ChatApp/service/firebase_options.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:hive/hive.dart';
 import 'package:hive_flutter/adapters.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -41,6 +42,7 @@ void main() async {
 
     // ✅ تسجيل Adapter HiveChat
     Hive.registerAdapter(HiveChatAdapter());
+    Hive.registerAdapter(HiveMessageAdapter());
 
     // ✅ فتح الصناديق المطلوبة
     await Hive.openBox<HiveChat>(AdvancedCacheService.chatBoxName);
@@ -103,82 +105,18 @@ class MyApp extends ConsumerStatefulWidget {
 }
 
 class _MyAppState extends ConsumerState<MyApp> {
-  bool _isChecking = true;
-  bool _isLoggedIn = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _checkAuthState();
-  }
-
-  Future<void> _checkAuthState() async {
-    try {
-      final authService = ref.read(authServiceProvider);
-      final isLoggedIn = await authService.checkLogin();
-      final bool isConnected = await InternetConnection().hasInternetAccess;
-
-      setState(() {
-        _isLoggedIn = isLoggedIn;
-        _isChecking = false;
-      });
-
-      if (!isConnected && isLoggedIn) {
-        if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (context) => HomeScreen()),
-            (route) => false,
-          );
-        }
-      }
-
-      if (isLoggedIn) {
-        final prefs = await SharedPreferences.getInstance();
-        final userEmail = prefs.getString('userEmail');
-
-        if (userEmail != null) {
-          final user = await authService.getUserByPhone(userEmail);
-
-          if (user != null && mounted) {
-            ref.read(appUserDataProvider.notifier).state = user;
-            ref.read(appUserPhoneProvider.notifier).state = user.email;
-            ref.read(isLoadingProvider.notifier).state = true;
-
-            // ✅ تسجيل المستخدم في OneSignal
-            try {
-              await NotificationService().loginUser(user.phone);
-              print('✅ تم تسجيل ${user.email} في OneSignal');
-            } catch (e) {
-              print('❌ خطأ في تسجيل OneSignal: $e');
-            }
-          }
-        }
-      }
-    } catch (e) {
-      print('❌ خطأ في فحص حالة المصادقة: $e');
-      setState(() {
-        _isChecking = false;
-      });
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
-    if (_isChecking) {
-      return const MaterialApp(
-        debugShowCheckedModeBanner: false,
-        home: Scaffold(body: Center(child: CircularProgressIndicator())),
-      );
-    }
+
 
     return MaterialApp(
       navigatorKey: NotificationHandler().navigatorKey,
       title: 'Chat App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.green),
-      home: _isLoggedIn ? const HomeScreen() : const LoginScreen(),
-
+      home: SplashScreen()
     );
   }
 }

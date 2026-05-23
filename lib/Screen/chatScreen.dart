@@ -1,7 +1,7 @@
-import 'dart:async';
+// lib/screens/chat_screen.dart
 
+import 'dart:async';
 import 'package:ChatApp/Provider/chatProvider.dart';
-import 'package:ChatApp/Provider/messageProvder.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:ChatApp/model/chat.dart';
 import 'package:ChatApp/model/user.dart';
@@ -13,6 +13,7 @@ import 'package:internet_connection_checker_plus/internet_connection_checker_plu
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../Notifications/notifications.dart';
+import '../Provider/messageProvder.dart';
 import '../model/Message.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -41,6 +42,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   StreamSubscription? connectionSubscription;
   bool _isBlocked = false;
   String? _blockedBy;
+  // ✅ قائمة مؤقتة للرسائل (محلية داخل الشاشة فقط)
+  final List<Message> _localMessages = [];
+
+  // ✅ قائمة بأرقام التعريف التي تم إرسالها بنجاح (لمنع الازدواجية)
+  final Set<String> _syncedMessageIds = {};
 
   @override
   bool get wantKeepAlive => true;
@@ -48,12 +54,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   @override
   void initState() {
     super.initState();
-    _markMessagesAsRead();
-    _scrollToBottom();
+    //_markMessageAsSynced(messageId);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToBottom();
+    });
 
     NotificationService.currentOpenChatId = widget.chat.id;
 
-    connectionSubscription = InternetConnection().onStatusChange.listen((status) {
+    connectionSubscription = InternetConnection().onStatusChange.listen((
+      status,
+    ) {
       final hasConnection = status == InternetStatus.connected;
 
       if (isConnected != hasConnection) {
@@ -70,6 +81,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         }
       }
     });
+
+
   }
 
   @override
@@ -82,61 +95,67 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (NotificationService.currentOpenChatId == widget.chat.id) {
       NotificationService.currentOpenChatId = null;
     }
+// ✅ تنظيف البيانات المحلية عند الخروج من الشاشة
+    _localMessages.clear();
+    _syncedMessageIds.clear();
 
+    print('🗑️ تم تنظيف البيانات المحلية للمحادثة ${widget.chat.id}');
+
+    if (NotificationService.currentOpenChatId == widget.chat.id) {
+      NotificationService.currentOpenChatId = null;
+    }
     super.dispose();
   }
 
-  void _addPendingMessage(Message message) {
+  // ✅ إضافة رسالة إلى القائمة المحلية
+  void _addLocalMessage(Message message) {
     setState(() {
-      _pendingMessages.add(message);
-      _pendingMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      _localMessages.add(message);
+      _localMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     });
     _scrollToBottom();
   }
 
-  void _removePendingMessage(String messageId) {
+  // ✅ وضع علامة "تمت المزامنة" على رسالة (لمنع إعادة عرضها)
+  void _markMessageAsSynced(String messageId) {
     setState(() {
-      _pendingMessages.removeWhere((msg) => msg.id == messageId);
+      _syncedMessageIds.add(messageId);
     });
   }
 
+  // ✅ دمج الرسائل (من Firebase + المحلية)
   List<Message> _getCombinedMessages(List<Message> firebaseMessages) {
-    final combined = <Message>[..._pendingMessages];
+    final combined = <Message>[];
 
+    // 1. إضافة رسائل Firebase أولاً
     for (var msg in firebaseMessages) {
-      if (!_pendingMessages.any((pending) => pending.id == msg.id)) {
-        combined.add(msg);
+      combined.add(msg);
+    }
+
+    // 2. إضافة الرسائل المحلية التي لم تظهر بعد في Firebase
+    for (var localMsg in _localMessages) {
+      final existsInFirebase = firebaseMessages.any((fbMsg) => fbMsg.id == localMsg.id);
+      final isMarkedSynced = _syncedMessageIds.contains(localMsg.id);
+
+      // إذا لم تظهر في Firebase ولم يتم وضع علامة عليها، أضفها
+      if (!existsInFirebase && !isMarkedSynced) {
+        combined.add(localMsg);
       }
     }
 
+    // ترتيب حسب الوقت
     combined.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     return combined;
   }
 
-  Future<void> _markMessagesAsRead() async {
-    final currentUser = ref.read(appUserDataProvider);
-    if (currentUser != null && currentUser.phone.isNotEmpty) {
-      try {
-        await ref
-            .read(messageServiceProvider)
-            .markMessagesAsRead(widget.chat.id, currentUser.phone);
-      } catch (e) {
-        print('❌ خطأ في تحديث حالة القراءة: $e');
-      }
-    }
-  }
-
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients &&
-          _scrollController.position.maxScrollExtent > 0) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
   }
 
   void _showSuccessSnackBar(String message) {
@@ -213,28 +232,36 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       timestamp: DateTime.now().millisecondsSinceEpoch,
       isRead: false,
       isDeleted: false,
-      isSynced: isConnected,
+      isSynced: false, // ✅ في البداية غير متزامنة
     );
 
-    _addPendingMessage(message);
+    // ✅ إضافة إلى القائمة المحلية فوراً
+    _addLocalMessage(message);
 
-    try {
-      final chatService = ref.read(chatServiceProvider);
-      final isDelete = await chatService.isChatDeletedForUser(widget.chat.id, currentUser.phone);
-      if (isDelete) {
-        await chatService.restoreDeletedChat(widget.chat.id, currentUser.phone);
+    if (isConnected) {
+      try {
+        final chatService = ref.read(chatServiceProvider);
+        final isDelete = await chatService.isChatDeletedForUser(widget.chat.id, currentUser.phone);
+        if (isDelete) {
+          await chatService.restoreDeletedChat(widget.chat.id, currentUser.phone);
+        }
+      } catch (e) {
+        print("⚠️ فشل التحقق من حالة حذف المحادثة: $e");
       }
-    } catch (e) {
-      print("⚠️ فشل التحقق من حالة حذف المحادثة: $e");
     }
 
+    // ✅ إرسال الرسالة في الخلفية
     ref.read(messageServiceProvider).sendMessage(message, tempMessageId).then((_) {
-      _removePendingMessage(tempMessageId);
+      // ✅ وضع علامة أن هذه الرسالة تمت مزامنتها (لمنع عرضها مرة أخرى)
+      _markMessageAsSynced(tempMessageId);
+
+      // ✅ تحديث الـ Provider لجلب البيانات من Firebase
       ref.invalidate(messagesProvider(widget.chat.id));
+
+      // ✅ لا نحذف من _localMessages لتجنب الوميض
     }).catchError((e) {
       print('❌ فشل الإرسال: $e');
-      _removePendingMessage(tempMessageId);
-      if (mounted) {
+      if (mounted && isConnected) {
         _showErrorSnackBar('فشل إرسال الرسالة');
       }
     });
@@ -276,8 +303,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
     final allMessages = messagesAsync.when(
       data: (messages) => _getCombinedMessages(messages),
-      loading: () => _pendingMessages,
-      error: (_, __) => _pendingMessages,
+      loading: () => _localMessages,
+      error: (_, __) => _localMessages,
     );
 
     final blockStatus = ref.watch(chatBlockStatusProvider(widget.chat.id));
@@ -308,6 +335,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       appBar: _buildAppBar(receiverName, receiverData, isUserBlocked),
       body: Column(
         children: [
+          if (!isConnected)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              color: Colors.orange,
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.wifi_off, size: 16, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text(
+                    'وضع الأوفلاين - سيتم إرسال الرسائل عند عودة الاتصال',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: messagesAsync.when(
               data: (messages) {
@@ -324,15 +368,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
                 return ListView.builder(
                   controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   itemCount: allMessages.length,
                   itemBuilder: (context, index) {
                     final message = allMessages[index];
-                    final isMe = currentUser != null && message.senderUser == currentUser.phone;
+                    final isMe =
+                        currentUser != null &&
+                        message.senderUser == currentUser.phone;
 
-                    final isPending = _pendingMessages.any((m) => m.id == message.id);
-                    final isSameSenderAsPrevious = index > 0 && allMessages[index - 1].senderUser == message.senderUser;
-                    final isSameSenderAsNext = index < allMessages.length - 1 && allMessages[index + 1].senderUser == message.senderUser;
+                    final isPending = _pendingMessages.any(
+                      (m) => m.id == message.id,
+                    );
+                    final isSameSenderAsPrevious =
+                        index > 0 &&
+                        allMessages[index - 1].senderUser == message.senderUser;
+                    final isSameSenderAsNext =
+                        index < allMessages.length - 1 &&
+                        allMessages[index + 1].senderUser == message.senderUser;
 
                     return _buildMessageBubble(
                       message,
@@ -348,16 +403,41 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 if (_pendingMessages.isNotEmpty) {
                   return ListView.builder(
                     controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     itemCount: _pendingMessages.length,
                     itemBuilder: (context, index) {
                       final message = _pendingMessages[index];
-                      final isMe = currentUser != null && message.senderUser == currentUser.phone;
-                      return _buildMessageBubble(message, isMe, false, false, isPending: true);
+                      final isMe =
+                          currentUser != null &&
+                          message.senderUser == currentUser.phone;
+                      return _buildMessageBubble(
+                        message,
+                        isMe,
+                        false,
+                        false,
+                        isPending: true,
+                      );
                     },
                   );
                 }
-                return const Center(child: CircularProgressIndicator(color: Colors.green));
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const CircularProgressIndicator(color: Colors.green),
+                      const SizedBox(height: 16),
+                      if (!isConnected)
+                        const Text(
+                          'لا يوجد اتصال بالإنترنت\nجاري عرض الرسائل المخزنة...',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                    ],
+                  ),
+                );
               },
               error: (error, stackTrace) => _buildErrorState(error.toString()),
             ),
@@ -369,10 +449,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   PreferredSizeWidget _buildAppBar(
-      String receiverName,
-      AsyncValue<AppUser?> receiverData,
-      bool isUserBlocked,
-      ) {
+    String receiverName,
+    AsyncValue<AppUser?> receiverData,
+    bool isUserBlocked,
+  ) {
     return AppBar(
       backgroundColor: const Color(0xFF075E54),
       elevation: 1,
@@ -400,29 +480,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     backgroundColor: Colors.green[50],
                     child: imageUrl != null && imageUrl.isNotEmpty
                         ? ClipOval(
-                      child: Image.network(
-                        imageUrl,
-                        width: 40,
-                        height: 40,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Text(
-                          name[0].toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green,
-                          ),
-                        ),
-                      ),
-                    )
+                            child: Image.network(
+                              imageUrl,
+                              width: 40,
+                              height: 40,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Text(
+                                name[0].toUpperCase(),
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green,
+                                ),
+                              ),
+                            ),
+                          )
                         : Text(
-                      name[0].toUpperCase(),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green,
-                      ),
-                    ),
+                            name[0].toUpperCase(),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green,
+                            ),
+                          ),
                   ),
                 );
               },
@@ -464,7 +544,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   if (isUserBlocked)
                     const Text(
                       'تم حظر هذا المستخدم',
-                      style: TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     )
                   else
                     receiverData.when(
@@ -478,11 +562,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       ),
                       loading: () => const Text(
                         'جاري التحميل...',
-                        style: TextStyle(color: Color(0xFFB0BEC5), fontSize: 12),
+                        style: TextStyle(
+                          color: Color(0xFFB0BEC5),
+                          fontSize: 12,
+                        ),
                       ),
                       error: (_, __) => const Text(
                         'غير معروف',
-                        style: TextStyle(color: Color(0xFFB0BEC5), fontSize: 12),
+                        style: TextStyle(
+                          color: Color(0xFFB0BEC5),
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                 ],
@@ -504,14 +594,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           icon: const Icon(Icons.more_vert, color: Colors.white),
           onSelected: (value) => _handlePopupMenu(value),
           itemBuilder: (context) => [
-            const PopupMenuItem(value: 'clear', child: Text('مسح المحادثة', style: TextStyle(fontWeight: FontWeight.bold))),
+            const PopupMenuItem(
+              value: 'clear',
+              child: Text(
+                'مسح المحادثة',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
             PopupMenuItem(
               value: 'block',
-              child: Text(isUserBlocked ? 'إلغاء الحظر' : 'حظر المستخدم', style: const TextStyle(fontWeight: FontWeight.bold)),
+              child: Text(
+                isUserBlocked ? 'إلغاء الحظر' : 'حظر المستخدم',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
             const PopupMenuItem(
               value: 'report',
-              child: Text('الإبلاغ عن محتوى غير مناسب', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: Text(
+                'الإبلاغ عن محتوى غير مناسب',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),
@@ -522,7 +624,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void _showComingSoonMessage() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('هذه الميزة قريباً', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(
+          'هذه الميزة قريباً',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         duration: Duration(seconds: 1),
       ),
     );
@@ -604,16 +709,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     'هل أنت متأكد من مسح جميع الرسائل؟',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                        fontSize: 16,
-                        color: Color(0xFF303030),
-                        fontWeight: FontWeight.bold
+                      fontSize: 16,
+                      color: Color(0xFF303030),
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
                 const SizedBox(height: 12),
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 20),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.orange[50],
                     borderRadius: BorderRadius.circular(16),
@@ -621,7 +729,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.info_outline, size: 18, color: Colors.orange[700]),
+                      Icon(
+                        Icons.info_outline,
+                        size: 18,
+                        color: Colors.orange[700],
+                      ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
@@ -638,7 +750,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 ),
                 const SizedBox(height: 24),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
                   child: Row(
                     children: [
                       Expanded(
@@ -672,8 +787,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
                                 colors: [Colors.red[600]!, Colors.orange[600]!],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
                               ),
                               borderRadius: BorderRadius.circular(16),
                               boxShadow: [
@@ -722,7 +835,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
       try {
         await ref.read(chatServiceProvider).clearChat(widget.chat.id);
-
         if (mounted) {
           Navigator.pop(context);
           ref.invalidate(messagesProvider(widget.chat.id));
@@ -802,19 +914,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 24),
                     child: Text(
-                      'هل أنت متأكد من إلغاء حظر ${widget.receiverPhone}؟',
+                      'هل أنت متأكد من إلغاء حظر ${widget.receiverPhone}？',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey[600],
-                        height: 1.4,
-                      ),
+                      style: TextStyle(fontSize: 16, color: Colors.grey[600]),
                     ),
                   ),
                   const SizedBox(height: 12),
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 20),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.green[50],
                       borderRadius: BorderRadius.circular(16),
@@ -822,7 +933,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.info_outline, size: 18, color: Colors.green[700]),
+                        Icon(
+                          Icons.info_outline,
+                          size: 18,
+                          color: Colors.green[700],
+                        ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
@@ -830,7 +945,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                             style: TextStyle(
                               fontSize: 13,
                               color: Colors.green[700],
-                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
@@ -839,7 +953,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   ),
                   const SizedBox(height: 24),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 16,
+                    ),
                     child: Row(
                       children: [
                         Expanded(
@@ -857,7 +974,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                   style: TextStyle(
                                     color: Colors.grey[700],
                                     fontSize: 16,
-                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
@@ -872,16 +988,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
-                                  colors: [Colors.green[600]!, Colors.green[400]!],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Colors.green[600]!,
+                                    Colors.green[400]!,
+                                  ],
                                 ),
                                 borderRadius: BorderRadius.circular(16),
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.green.withOpacity(0.3),
                                     blurRadius: 8,
-                                    offset: const Offset(0, 4),
                                   ),
                                 ],
                               ),
@@ -914,17 +1030,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           await ref
               .read(chatServiceProvider)
               .unblockUser(widget.chat.id, currentUser.phone);
-
           ref.invalidate(chatBlockStatusProvider(widget.chat.id));
           ref.invalidate(messagesProvider(widget.chat.id));
-
-          if (mounted) {
-            _showSuccessSnackBar('تم إلغاء حظر المستخدم بنجاح');
-          }
+          if (mounted) _showSuccessSnackBar('تم إلغاء حظر المستخدم بنجاح');
         } catch (e) {
-          if (mounted) {
-            _showErrorSnackBar('فشل إلغاء الحظر');
-          }
+          if (mounted) _showErrorSnackBar('فشل إلغاء الحظر');
         }
       }
     } else {
@@ -967,11 +1077,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       color: Colors.red[50],
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(
-                      Icons.block,
-                      size: 48,
-                      color: Colors.red[600],
-                    ),
+                    child: Icon(Icons.block, size: 48, color: Colors.red[600]),
                   ),
                   const SizedBox(height: 16),
                   const Text(
@@ -988,17 +1094,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     child: Text(
                       'هل أنت متأكد من حظر ${widget.receiverPhone}؟',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey[600],
-                        height: 1.4,
-                      ),
+                      style: TextStyle(fontSize: 16, color: Colors.grey[600]),
                     ),
                   ),
                   const SizedBox(height: 12),
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 20),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.red[50],
                       borderRadius: BorderRadius.circular(16),
@@ -1006,7 +1111,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.warning_amber_rounded, size: 18, color: Colors.red[700]),
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          size: 18,
+                          color: Colors.red[700],
+                        ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
@@ -1014,7 +1123,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                             style: TextStyle(
                               fontSize: 13,
                               color: Colors.red[700],
-                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
@@ -1023,7 +1131,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   ),
                   const SizedBox(height: 24),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 16,
+                    ),
                     child: Row(
                       children: [
                         Expanded(
@@ -1041,7 +1152,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                   style: TextStyle(
                                     color: Colors.grey[700],
                                     fontSize: 16,
-                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
@@ -1057,15 +1167,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
                                   colors: [Colors.red[600]!, Colors.red[400]!],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
                                 ),
                                 borderRadius: BorderRadius.circular(16),
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.red.withOpacity(0.3),
                                     blurRadius: 8,
-                                    offset: const Offset(0, 4),
                                   ),
                                 ],
                               ),
@@ -1098,17 +1205,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           await ref
               .read(chatServiceProvider)
               .blockUser(widget.chat.id, currentUser.phone);
-
           ref.invalidate(chatBlockStatusProvider(widget.chat.id));
           ref.invalidate(messagesProvider(widget.chat.id));
-
-          if (mounted) {
-            _showSuccessSnackBar('تم حظر المستخدم بنجاح');
-          }
+          if (mounted) _showSuccessSnackBar('تم حظر المستخدم بنجاح');
         } catch (e) {
-          if (mounted) {
-            _showErrorSnackBar('فشل حظر المستخدم');
-          }
+          if (mounted) _showErrorSnackBar('فشل حظر المستخدم');
         }
       }
     }
@@ -1175,11 +1276,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   child: Text(
                     'اختر سبب الإبلاغ عن المستخدم ${widget.receiverPhone}',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey[600],
-                      height: 1.4,
-                    ),
+                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -1231,7 +1328,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 ),
                 const SizedBox(height: 20),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
                   child: GestureDetector(
                     onTap: () => Navigator.pop(context),
                     child: Container(
@@ -1247,7 +1347,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                           style: TextStyle(
                             color: Colors.grey[700],
                             fontSize: 16,
-                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
@@ -1264,7 +1363,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
     if (result != null) {
       try {
-        final database = ref.read(chatDatabaseProvider);
+        final database = ref.read(firebaseDatabaseProvider);
         await database.ref('reports').push().set({
           'reporterPhone': ref.read(appUserPhoneProvider),
           'reportedPhone': widget.receiverPhone,
@@ -1319,10 +1418,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                   ),
                 ],
               ),
@@ -1334,7 +1430,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  Widget _buildEmptyState(String receiverName, AsyncValue<AppUser?> receiverData) {
+  Widget _buildEmptyState(
+    String receiverName,
+    AsyncValue<AppUser?> receiverData,
+  ) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -1352,18 +1451,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 ),
                 child: imageUrl != null && imageUrl.isNotEmpty
                     ? ClipOval(
-                  child: Image.network(
-                    imageUrl,
-                    width: 100,
-                    height: 100,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Icon(
-                      Icons.person,
-                      size: 50,
-                      color: Colors.green[300],
-                    ),
-                  ),
-                )
+                        child: Image.network(
+                          imageUrl,
+                          width: 100,
+                          height: 100,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Icon(
+                            Icons.person,
+                            size: 50,
+                            color: Colors.green[300],
+                          ),
+                        ),
+                      )
                     : Icon(Icons.person, size: 50, color: Colors.green[300]),
               );
             },
@@ -1405,18 +1504,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             child: const Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  Icons.lock_outline,
-                  size: 14,
-                  color: Color(0xFF8D6E63),
-                ),
+                Icon(Icons.lock_outline, size: 14, color: Color(0xFF8D6E63)),
                 SizedBox(width: 8),
                 Text(
                   'الرسائل مشفرة من الطرف إلى الطرف',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF8D6E63),
-                  ),
+                  style: TextStyle(fontSize: 12, color: Color(0xFF8D6E63)),
                 ),
               ],
             ),
@@ -1424,18 +1516,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           const SizedBox(height: 24),
           const Text(
             'لا توجد رسائل بعد',
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: 14,
-            ),
+            style: TextStyle(color: Colors.grey, fontSize: 14),
           ),
           const SizedBox(height: 8),
           const Text(
             'أرسل رسالتك الأولى الآن',
-            style: TextStyle(
-              color: Colors.green,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: Colors.green, fontSize: 12),
           ),
         ],
       ),
@@ -1463,10 +1549,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             child: Text(
               error,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.grey[600], fontSize: 12),
             ),
           ),
           const SizedBox(height: 16),
@@ -1487,12 +1570,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   Widget _buildMessageBubble(
-      Message message,
-      bool isMe,
-      bool isSameSenderAsPrevious,
-      bool isSameSenderAsNext, {
-        bool isPending = false,
-      }) {
+    Message message,
+    bool isMe,
+    bool isSameSenderAsPrevious,
+    bool isSameSenderAsNext, {
+    bool isPending = false,
+  }) {
+    // ✅ تحديد إذا كانت الرسالة لا تزال تنتظر المزامنة
+    final isNotSyncedYet = _localMessages.any((m) => m.id == message.id) &&
+        !_syncedMessageIds.contains(message.id);
+
     if (message.isDeleted && message.body.contains('تم حذف')) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1556,7 +1643,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         child: Align(
           alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
           child: Column(
-            crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            crossAxisAlignment: isMe
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
             children: [
               if (!isMe && !isSameSenderAsPrevious)
                 Padding(
@@ -1567,7 +1656,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   ),
                 ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: isMe ? const Color(0xFFDCF8C6) : Colors.white,
                   borderRadius: _getMessageBorderRadius(
@@ -1610,7 +1702,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         ),
                         if (isMe) ...[
                           const SizedBox(width: 4),
-                          if (isPending)
+                          if (isNotSyncedYet)
                             const Icon(
                               Icons.access_time,
                               size: 14,
@@ -1636,211 +1728,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   Future<void> _showEditMessageDialog(Message message) async {
-    final TextEditingController editController = TextEditingController();
-    editController.text = message.body;
+    final TextEditingController editController = TextEditingController(
+      text: message.body,
+    );
     final FocusNode focusNode = FocusNode();
-
-    Future.delayed(const Duration(milliseconds: 100), () {
-      focusNode.requestFocus();
-    });
-
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: true,
-      barrierColor: Colors.black.withOpacity(0.6),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Dialog(
-              elevation: 0,
-              backgroundColor: Colors.transparent,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(28),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 20,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      height: 6,
-                      width: 60,
-                      margin: const EdgeInsets.only(top: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[300],
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.only(top: 20, left: 24, right: 24),
-                      child: Row(
-                        children: [
-                          Icon(Icons.edit_note, color: Color(0xFF075E54), size: 28),
-                          SizedBox(width: 12),
-                          Text(
-                            'تعديل الرسالة',
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF075E54),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.grey[50],
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.grey[200]!),
-                        ),
-                        child: TextFormField(
-                          controller: editController,
-                          focusNode: focusNode,
-                          maxLines: 5,
-                          minLines: 3,
-                          decoration: InputDecoration(
-                            hintText: 'اكتب رسالتك الجديدة...',
-                            hintStyle: TextStyle(color: Colors.grey[400]),
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
-                            ),
-                          ),
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Row(
-                        children: [
-                          Icon(Icons.info_outline, size: 14, color: Colors.grey[500]),
-                          const SizedBox(width: 6),
-                          Text(
-                            'سيظهر للمستلم أن الرسالة تم تعديلها',
-                            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => Navigator.pop(context, false),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 14),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[100],
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    'إلغاء',
-                                    style: TextStyle(
-                                      color: Colors.grey[700],
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                if (editController.text.trim().isNotEmpty) {
-                                  Navigator.pop(context, true);
-                                }
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 14),
-                                decoration: BoxDecoration(
-                                  gradient: const LinearGradient(
-                                    colors: [Color(0xFF075E54), Color(0xFF128C7E)],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
-                                  borderRadius: BorderRadius.circular(16),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(0xFF075E54).withOpacity(0.3),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 4),
-                                    ),
-                                  ],
-                                ),
-                                child: const Center(
-                                  child: Text(
-                                    'حفظ التعديل',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+    Future.delayed(
+      const Duration(milliseconds: 100),
+      () => focusNode.requestFocus(),
     );
 
-    if (result == true && editController.text.trim().isNotEmpty) {
-      try {
-        await ref
-            .read(messageServiceProvider)
-            .editMessage(
-          chatId: widget.chat.id,
-          messageId: message.id,
-          newBody: editController.text.trim(),
-        );
-        if (mounted) {
-          _showSuccessSnackBar('تم تعديل الرسالة بنجاح');
-        }
-      } catch (e) {
-        if (mounted) {
-          _showErrorSnackBar('فشل تعديل الرسالة');
-        }
-      }
-    }
-  }
-
-  Future<void> _showDeleteMessageDialog(Message message) async {
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: true,
       barrierColor: Colors.black.withOpacity(0.6),
-      builder: (context) {
-        return Dialog(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Dialog(
           elevation: 0,
           backgroundColor: Colors.transparent,
           child: Container(
@@ -1867,44 +1769,74 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                Container(
-                  margin: const EdgeInsets.only(top: 20),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.red[50],
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.delete_outline,
-                    size: 48,
-                    color: Colors.red[400],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'حذف الرسالة',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF303030),
+                const Padding(
+                  padding: EdgeInsets.only(top: 20, left: 24, right: 24),
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit_note, color: Color(0xFF075E54), size: 28),
+                      SizedBox(width: 12),
+                      Text(
+                        'تعديل الرسالة',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF075E54),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 12),
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Text(
-                    'هل أنت متأكد من حذف هذه الرسالة؟\nلن يتمكن ${message.senderUser == ref.read(appUserPhoneProvider) ? 'المستلم' : 'المرسل'} من رؤيتها',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey[600],
-                      height: 1.4,
+                const SizedBox(height: 20),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.grey[200]!),
                     ),
+                    child: TextFormField(
+                      controller: editController,
+                      focusNode: focusNode,
+                      maxLines: 5,
+                      minLines: 3,
+                      decoration: InputDecoration(
+                        hintText: 'اكتب رسالتك الجديدة...',
+                        hintStyle: TextStyle(color: Colors.grey[400]),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                      ),
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 14,
+                        color: Colors.grey[500],
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'سيظهر للمستلم أن الرسالة تم تعديلها',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 24),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
                   child: Row(
                     children: [
                       Expanded(
@@ -1922,7 +1854,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                 style: TextStyle(
                                   color: Colors.grey[700],
                                   fontSize: 16,
-                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ),
@@ -1932,27 +1863,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       const SizedBox(width: 12),
                       Expanded(
                         child: GestureDetector(
-                          onTap: () => Navigator.pop(context, true),
+                          onTap: () {
+                            if (editController.text.trim().isNotEmpty)
+                              Navigator.pop(context, true);
+                          },
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Colors.red[600]!, Colors.red[400]!],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF075E54), Color(0xFF128C7E)],
                               ),
                               borderRadius: BorderRadius.circular(16),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.red.withOpacity(0.3),
+                                  color: const Color(
+                                    0xFF075E54,
+                                  ).withOpacity(0.3),
                                   blurRadius: 8,
-                                  offset: const Offset(0, 4),
                                 ),
                               ],
                             ),
                             child: const Center(
                               child: Text(
-                                'حذف',
+                                'حفظ التعديل',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 16,
@@ -1970,8 +1903,157 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               ],
             ),
           ),
-        );
-      },
+        ),
+      ),
+    );
+
+    if (result == true && editController.text.trim().isNotEmpty) {
+      try {
+        await ref
+            .read(messageServiceProvider)
+            .editMessage(
+              chatId: widget.chat.id,
+              messageId: message.id,
+              newBody: editController.text.trim(),
+            );
+        if (mounted) _showSuccessSnackBar('تم تعديل الرسالة بنجاح');
+      } catch (e) {
+        if (mounted) _showErrorSnackBar('فشل تعديل الرسالة');
+      }
+    }
+  }
+
+  Future<void> _showDeleteMessageDialog(Message message) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.6),
+      builder: (context) => Dialog(
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.2),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                height: 6,
+                width: 60,
+                margin: const EdgeInsets.only(top: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              Container(
+                margin: const EdgeInsets.only(top: 20),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.delete_outline,
+                  size: 48,
+                  color: Colors.red[400],
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'حذف الرسالة',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF303030),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  'هل أنت متأكد من حذف هذه الرسالة؟\nلن يتمكن ${message.senderUser == ref.read(appUserPhoneProvider) ? 'المستلم' : 'المرسل'} من رؤيتها',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 16,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => Navigator.pop(context, false),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Center(
+                            child: Text(
+                              'إلغاء',
+                              style: TextStyle(
+                                color: Colors.grey[700],
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => Navigator.pop(context, true),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Colors.red[600]!, Colors.red[400]!],
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.red.withOpacity(0.3),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                          child: const Center(
+                            child: Text(
+                              'حذف',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
     );
 
     if (result == true) {
@@ -1979,27 +2061,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         await ref
             .read(messageServiceProvider)
             .deleteMessage(
-          chatId: widget.chat.id,
-          messageId: message.id,
-          forEveryone: true,
-        );
+              chatId: widget.chat.id,
+              messageId: message.id,
+              forEveryone: true,
+            );
         ref.invalidate(messagesProvider(widget.chat.id));
-        if (mounted) {
-          _showSuccessSnackBar('تم حذف الرسالة بنجاح');
-        }
+        if (mounted) _showSuccessSnackBar('تم حذف الرسالة بنجاح');
       } catch (e) {
-        if (mounted) {
-          _showErrorSnackBar('فشل حذف الرسالة');
-        }
+        if (mounted) _showErrorSnackBar('فشل حذف الرسالة');
       }
     }
   }
 
   BorderRadius _getMessageBorderRadius(
-      bool isMe,
-      bool isSameSenderAsPrevious,
-      bool isSameSenderAsNext,
-      ) {
+    bool isMe,
+    bool isSameSenderAsPrevious,
+    bool isSameSenderAsNext,
+  ) {
     if (isMe) {
       return BorderRadius.only(
         topLeft: const Radius.circular(16),
@@ -2043,11 +2121,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   Text(
                     'لن تتمكن من إرسال أو استقبال رسائل من ${widget.receiverPhone}',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
               ),
@@ -2056,14 +2130,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   ref.read(chatServiceProvider).unblockUser(chatId, myId);
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.green,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(
                     'إلغاء الحظر',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
@@ -2124,11 +2204,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 onPressed: _sendMessage,
                 icon: CircleAvatar(
                   backgroundColor: Colors.green,
-                  child: const Icon(
-                    Icons.send,
-                    color: Colors.white,
-                    size: 18,
-                  ),
+                  child: const Icon(Icons.send, color: Colors.white, size: 18),
                 ),
               ),
             ),
@@ -2146,152 +2222,156 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(30),
-              topRight: Radius.circular(30),
-            ),
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(30),
+            topRight: Radius.circular(30),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                margin: const EdgeInsets.only(top: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(10),
-                ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(10),
               ),
-              Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.green.withOpacity(0.3),
-                            blurRadius: 5,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      child: CircleAvatar(
-                        radius: 60,
-                        backgroundColor: const Color(0xFF075E54).withOpacity(0.1),
-                        child: Text(
-                          currentUser.displayName.isNotEmpty
-                              ? currentUser.displayName[0].toUpperCase()
-                              : 'U',
-                          style: const TextStyle(
-                            fontSize: 48,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF075E54),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      currentUser.displayName,
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[100],
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        currentUser.phone ?? 'رقم الهاتف غير متوفر',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[700],
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Chip(
-                      avatar: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isConnected ? Colors.green : Colors.grey,
-                        ),
-                      ),
-                      label: Text(
-                        isConnected ? 'متصل الآن' : 'غير متصل',
-                        style: TextStyle(
-                          color: isConnected ? Colors.green[700] : Colors.grey[700],
-                        ),
-                      ),
-                      backgroundColor: isConnected
-                          ? Colors.green.withOpacity(0.1)
-                          : Colors.grey.withOpacity(0.1),
-                    ),
-                    const SizedBox(height: 32),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              Navigator.pop(context);
-                              _showEditProfileBottomSheet();
-                            },
-                            icon: const Icon(Icons.edit, size: 20),
-                            label: const Text(
-                              'تعديل',
-                              style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.green,
-                              side: const BorderSide(color: Colors.green),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => Navigator.pop(context),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF075E54),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: const Text(
-                              'إغلاق',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                            ),
-                          ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.green.withOpacity(0.3),
+                          blurRadius: 5,
                         ),
                       ],
                     ),
-                  ],
-                ),
+                    child: CircleAvatar(
+                      radius: 60,
+                      backgroundColor: const Color(0xFF075E54).withOpacity(0.1),
+                      child: Text(
+                        currentUser.displayName.isNotEmpty
+                            ? currentUser.displayName[0].toUpperCase()
+                            : 'U',
+                        style: const TextStyle(
+                          fontSize: 48,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF075E54),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    currentUser.displayName,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      currentUser.phone ?? 'رقم الهاتف غير متوفر',
+                      style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Chip(
+                    avatar: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isConnected ? Colors.green : Colors.grey,
+                      ),
+                    ),
+                    label: Text(
+                      isConnected ? 'متصل الآن' : 'غير متصل',
+                      style: TextStyle(
+                        color: isConnected
+                            ? Colors.green[700]
+                            : Colors.grey[700],
+                      ),
+                    ),
+                    backgroundColor: isConnected
+                        ? Colors.green.withOpacity(0.1)
+                        : Colors.grey.withOpacity(0.1),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _showEditProfileBottomSheet();
+                          },
+                          icon: const Icon(Icons.edit, size: 20),
+                          label: const Text(
+                            'تعديل',
+                            style: TextStyle(
+                              color: Colors.green,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.green,
+                            side: const BorderSide(color: Colors.green),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF075E54),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'إغلاق',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-            ],
-          ),
-        );
-      },
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2300,167 +2380,213 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (currentUser == null) return;
 
     final nameController = TextEditingController(text: currentUser.displayName);
-    final emailController = TextEditingController(text: currentUser.email ?? '');
+    final emailController = TextEditingController(
+      text: currentUser.email ?? '',
+    );
     bool isSaving = false;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(25),
-                    topRight: Radius.circular(25),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(25),
+                topRight: Radius.circular(25),
+              ),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 50,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 50,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: Colors.grey[300],
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
+                const SizedBox(height: 20),
+                const Text(
+                  'تعديل الملف الشخصي',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF075E54),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: nameController,
+                  decoration: InputDecoration(
+                    labelText: 'اسم المستخدم',
+                    labelStyle: const TextStyle(color: Color(0xFF075E54)),
+                    hintText: 'أدخل اسمك الجديد',
+                    prefixIcon: const Icon(
+                      Icons.person,
+                      color: Color(0xFF075E54),
                     ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'تعديل الملف الشخصي',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
                         color: Color(0xFF075E54),
+                        width: 2,
                       ),
                     ),
-                    const SizedBox(height: 20),
-                    TextField(
-                      controller: nameController,
-                      decoration: InputDecoration(
-                        labelText: 'اسم المستخدم',
-                        labelStyle: const TextStyle(color: Color(0xFF075E54)),
-                        hintText: 'أدخل اسمك الجديد',
-                        prefixIcon: const Icon(Icons.person, color: Color(0xFF075E54)),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: Color(0xFF075E54), width: 2),
-                        ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: InputDecoration(
+                    labelText: 'البريد الإلكتروني',
+                    labelStyle: const TextStyle(color: Color(0xFF075E54)),
+                    hintText: 'example@email.com',
+                    prefixIcon: const Icon(
+                      Icons.email,
+                      color: Color(0xFF075E54),
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF075E54),
+                        width: 2,
                       ),
                     ),
-                    const SizedBox(height: 20),
-                    TextField(
-                      controller: emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: InputDecoration(
-                        labelText: 'البريد الإلكتروني',
-                        labelStyle: const TextStyle(color: Color(0xFF075E54)),
-                        hintText: 'example@email.com',
-                        prefixIcon: const Icon(Icons.email, color: Color(0xFF075E54)),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: Color(0xFF075E54), width: 2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: isSaving ? null : () => Navigator.pop(context),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              side: const BorderSide(color: Colors.grey),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            child: const Text('إلغاء', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: isSaving
+                            ? null
+                            : () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: const BorderSide(color: Colors.grey),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: isSaving ? null : () async {
-                              final newName = nameController.text.trim();
-                              final newEmail = emailController.text.trim();
-
-                              if (newName.isEmpty) {
-                                Fluttertoast.showToast(msg: 'الاسم لا يمكن أن يكون فارغاً');
-                                return;
-                              }
-                              if (newEmail.isEmpty) {
-                                Fluttertoast.showToast(msg: 'البريد الإلكتروني لا يمكن أن يكون فارغاً');
-                                return;
-                              }
-
-                              setModalState(() => isSaving = true);
-
-                              try {
-                                final database = ref.read(chatDatabaseProvider);
-                                await database.ref('users').child(currentUser.id!).update({
-                                  'email': newEmail,
-                                  'displayName': newName,
-                                });
-
-                                final prefs = await SharedPreferences.getInstance();
-                                await prefs.setString('userEmail', newEmail);
-                                await prefs.setString('userName', newName);
-
-                                ref.read(appUserDataProvider.notifier).state = currentUser.copyWith(
-                                  displayName: newName,
-                                  email: newEmail,
-                                );
-
-                                _showSuccessSnackBar('تم تحديث البيانات بنجاح');
-
-                                if (context.mounted) {
-                                  Navigator.pop(context);
-                                }
-                              } catch (e) {
-                                print('❌ خطأ أثناء تحديث البيانات: $e');
-                                _showErrorSnackBar('حدث خطأ أثناء حفظ البيانات');
-                              } finally {
-                                if (context.mounted) {
-                                  setModalState(() => isSaving = false);
-                                }
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF075E54),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            child: isSaving
-                                ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                            )
-                                : const Text('حفظ', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'إلغاء',
+                          style: TextStyle(
+                            color: Colors.black87,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: isSaving
+                            ? null
+                            : () async {
+                                final newName = nameController.text.trim();
+                                final newEmail = emailController.text.trim();
+                                if (newName.isEmpty) {
+                                  Fluttertoast.showToast(
+                                    msg: 'الاسم لا يمكن أن يكون فارغاً',
+                                  );
+                                  return;
+                                }
+                                if (newEmail.isEmpty) {
+                                  Fluttertoast.showToast(
+                                    msg:
+                                        'البريد الإلكتروني لا يمكن أن يكون فارغاً',
+                                  );
+                                  return;
+                                }
+                                setModalState(() => isSaving = true);
+                                try {
+                                  final database = ref.read(
+                                    firebaseDatabaseProvider,
+                                  );
+                                  await database
+                                      .ref('users')
+                                      .child(currentUser.id!)
+                                      .update({
+                                        'email': newEmail,
+                                        'displayName': newName,
+                                      });
+                                  final prefs =
+                                      await SharedPreferences.getInstance();
+                                  await prefs.setString('userEmail', newEmail);
+                                  await prefs.setString('userName', newName);
+                                  ref
+                                      .read(appUserDataProvider.notifier)
+                                      .state = currentUser.copyWith(
+                                    displayName: newName,
+                                    email: newEmail,
+                                  );
+                                  _showSuccessSnackBar(
+                                    'تم تحديث البيانات بنجاح',
+                                  );
+                                  if (context.mounted) Navigator.pop(context);
+                                } catch (e) {
+                                  print('❌ خطأ أثناء تحديث البيانات: $e');
+                                  _showErrorSnackBar(
+                                    'حدث خطأ أثناء حفظ البيانات',
+                                  );
+                                } finally {
+                                  if (context.mounted)
+                                    setModalState(() => isSaving = false);
+                                }
+                              },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF075E54),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: isSaving
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                'حفظ',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                      ),
+                    ),
                   ],
                 ),
-              ),
-            );
-          },
-        );
-      },
+                const SizedBox(height: 10),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:ChatApp/Screen/home.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -142,6 +142,8 @@ class AuthService {
             await Future.delayed(const Duration(milliseconds: 500));
             await NotificationService().loginUser(user.phone);
 
+            Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) =>HomeScreen()), (route) => false,);
+
             return user;
           } else {
             throw Exception('كلمة المرور غير صحيحة');
@@ -189,6 +191,8 @@ class AuthService {
       _currentUserId = newUserRef.key;
       await _saveLoginState(true, newUser);
       await NotificationService().loginUser(newUser.phone);
+
+      Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) =>HomeScreen()), (route) => false,);
 
       return newUser;
     } catch (e) {

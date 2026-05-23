@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_contacts/contact.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../service/share_service.dart';
 import 'chatScreen.dart';
 
 class AddChatScreen extends ConsumerStatefulWidget {
@@ -301,7 +302,8 @@ class _AddChatScreenState extends ConsumerState<AddChatScreen> {
         }
       } else {
         // غير مسجل -> دعوة عبر SMS
-        _showInviteDialog(contact.displayName, "هذا الرقم غير مسجل بالتطبيق.",cleanTargetPhone);
+        //_showInviteDialog(contact.displayName, "هذا الرقم غير مسجل بالتطبيق.",cleanTargetPhone);
+        ShareService().shareOnWhatsApp(context);
       }
     } catch (e) {
       print("❌ خطأ في المطابقة: $e");
@@ -323,12 +325,14 @@ class _AddChatScreenState extends ConsumerState<AddChatScreen> {
           ElevatedButton.icon(
             onPressed: () async {
               Navigator.pop(context); // إغلاق النافذة
-
+/*
               // استدعاء دالة الواتساب الذكية
-              await ref.watch(chatServiceProvider).sendWhatsAppInvite(
+              await ref.watch(firebaseDatabaseProvider).sendWhatsAppInvite(
                 phoneNumber: phoneNumber,
                 contactName: name,
               );
+
+ */
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF075E54), // لون الواتساب الأخضر المميز

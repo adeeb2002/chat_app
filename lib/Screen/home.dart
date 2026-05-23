@@ -5,11 +5,14 @@ import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:ChatApp/Screen/addChatScreen.dart';
 import 'package:ChatApp/Screen/login.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../Notifications/CacheService.dart';
 import '../model/chat.dart';
 import '../model/user.dart';
@@ -62,7 +65,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
         if (isConnected) {
           print('🌐 عودة الاتصال بالإنترنت');
-          await _retryLoadingAfterConnection();
+          // ✅ فقط إذا كان الـ widget لا يزال موجوداً
+          if (mounted) {
+            await _retryLoadingAfterConnection();
+          }
         } else {
           print('⚠️ انقطاع الاتصال بالإنترنت');
           _checkOfflineMode();
@@ -91,10 +97,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     super.dispose();
   }
 
+  // في _retryLoadingAfterConnection
   Future<void> _retryLoadingAfterConnection() async {
     if (!isConnected) return;
 
     print('🔄 إعادة تحميل البيانات بعد عودة الاتصال...');
+
+    // ✅ التحقق من أن الـ widget لا يزال موجوداً قبل استخدام ref
+    if (!mounted) return;
 
     final currentUserPhone = ref.read(appUserPhoneProvider);
     final currentIdUser = await ref.read(authServiceProvider).getUserByPhoneLocal();
@@ -105,8 +115,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       }
 
       ref.invalidate(chatsProvider(currentUserPhone));
-
-      // ✅ إعادة تحميل بيانات المستخدمين أيضاً
       ref.invalidate(userDataProvider);
 
       final freshUser = await ref.read(authServiceProvider).getUserByPhone(currentUserPhone);
@@ -309,6 +317,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 _logout();
               } else if (value == 'profile') {
                 _showProfileBottomSheet();
+              } else if (value == 'share') {
+                _showShareOptions();
               }
             },
             itemBuilder: (context) => [
@@ -319,6 +329,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     Icon(Icons.person, size: 20, color: Colors.black),
                     SizedBox(width: 12),
                     Text('الملف الشخصي', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'share',
+                child: Row(
+                  children: [
+                    Icon(Icons.share, size: 20, color: Colors.green),
+                    SizedBox(width: 12),
+                    Text('مشاركة التطبيق', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   ],
                 ),
               ),
@@ -385,7 +405,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   onRefresh: () async {
                     if (isConnected) {
                       ref.invalidate(chatsProvider(currentUserPhone));
-                      ref.invalidate(userDataProvider); // ✅ تحديث بيانات المستخدمين
+                      ref.invalidate(userDataProvider);
                       await _retryLoadingAfterConnection();
                     } else {
                       Fluttertoast.showToast(msg: 'لا يوجد اتصال بالإنترنت لتحديث البيانات');
@@ -439,11 +459,121 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  void _showShareOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'شارك التطبيق مع أصدقائك',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: Color(0xFF25D366),
+                child: Icon(Icons.chat, color: Colors.white),
+              ),
+              title: const Text('مشاركة على واتساب'),
+              onTap: () {
+                Navigator.pop(context);
+                _shareOnWhatsApp();
+              },
+            ),
+            ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: Colors.blue,
+                child: Icon(Icons.share, color: Colors.white),
+              ),
+              title: const Text('مشاركة عامة'),
+              onTap: () {
+                Navigator.pop(context);
+                _shareGeneral();
+              },
+            ),
+            ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: Colors.purple,
+                child: Icon(Icons.link, color: Colors.white),
+              ),
+              title: const Text('نسخ رابط التحميل'),
+              onTap: () {
+                Navigator.pop(context);
+                _copyDownloadLink();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _shareOnWhatsApp() async {
+    const message = '''
+📱 **تطبيق المحادثات - تواصل بكل سهولة!**
+
+✨ **مميزات التطبيق:**
+• 💬 محادثات فورية وآمنة
+• 🔒 تشفير كامل للرسائل
+• 📸 مشاركة الصور والملفات
+• 🎤 رسائل صوتية
+• 🔔 إشعارات فورية
+
+📥 حمّل التطبيق الآن:
+https://play.google.com/store/apps/details?id=com.example.chatapp
+
+🌟 انضم إلى آلاف المستخدمين!
+    ''';
+
+    final whatsappUrl = 'whatsapp://send?text=${Uri.encodeComponent(message)}';
+    try {
+      if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
+        await launchUrl(Uri.parse(whatsappUrl));
+      } else {
+        Fluttertoast.showToast(msg: 'واتساب غير مثبت على جهازك');
+        _shareGeneral();
+      }
+    } catch (e) {
+      Fluttertoast.showToast(msg: 'حدث خطأ، حاول مرة أخرى');
+      _shareGeneral();
+    }
+  }
+
+  void _shareGeneral() async {
+    const message = '''
+📱 تطبيق المحادثات - تواصل بكل سهولة!
+
+مميزات التطبيق:
+• محادثات فورية وآمنة
+• تشفير كامل للرسائل
+• مشاركة الصور والملفات
+• رسائل صوتية
+• إشعارات فورية
+
+حمّل التطبيق الآن:
+https://play.google.com/store/apps/details?id=com.example.chatapp
+    ''';
+
+    await Share.share(message, subject: 'حمّل تطبيق المحادثات');
+  }
+
+  void _copyDownloadLink() async {
+    const link = 'https://play.google.com/store/apps/details?id=com.example.chatapp';
+    await Clipboard.setData(const ClipboardData(text: link));
+    Fluttertoast.showToast(msg: 'تم نسخ رابط التحميل');
+  }
+
   Widget _buildChatList(List<Chat> chats, String currentUserPhone) {
     final filteredChats = chats.where((chat) {
       final otherPhone = chat.getOtherParticipant(currentUserPhone);
-      // ✅ استخدام FutureProvider بشكل صحيح مع إعادة التحميل
-      final otherUserAsync = ref.watch(userDataProvider(otherPhone));
+      final otherUserAsync = ref.read(userDataProvider(otherPhone));
       final otherUser = otherUserAsync.value;
       final otherName = otherUser?.displayName.toLowerCase() ?? otherPhone.toLowerCase();
       return otherName.contains(_searchQuery) || otherPhone.contains(_searchQuery);
@@ -470,7 +600,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Widget _buildChatItem(Chat chat, String otherPhone, String currentUserPhone) {
-    // ✅ مراقبة بيانات المستخدم بشكل صحيح مع إعادة التحميل عند تغيير البيانات
     final userAsync = ref.watch(userDataProvider(otherPhone));
 
     return userAsync.when(
@@ -488,7 +617,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       loading: () => _buildLoadingChatTile(chat, otherPhone),
       error: (error, _) {
         print('❌ خطأ في تحميل بيانات المستخدم $otherPhone: $error');
-        // ✅ عرض المحادثة حتى لو فشل تحميل البيانات (استخدم رقم الهاتف كاسم مؤقت)
         return _buildChatTile(
           chat: chat,
           name: otherPhone,
@@ -500,33 +628,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  // ✅ دالة جديدة لعرض عنصر تحميل مع بيانات مؤقتة
+  // ✅ دالة محسنة لعرض عنصر تحميل مع بيانات مؤقتة
   Widget _buildLoadingChatTile(Chat chat, String otherPhone) {
     return Padding(
       padding: const EdgeInsets.all(8.0),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.grey[100],
-          borderRadius: BorderRadius.circular(15),
-        ),
-        child: ListTile(
-          leading: CircleAvatar(
-            radius: 28,
-            backgroundColor: Colors.green[50],
-            child: Text(
-              otherPhone.isNotEmpty ? otherPhone[0].toUpperCase() : '?',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green),
+      child: InkWell(
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(
+              chat: chat,
+              receiverPhone: otherPhone,
+              receiverName: otherPhone, // ✅ تمرير رقم الهاتف كاسم مؤقت
             ),
           ),
-          title: Text(otherPhone, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          subtitle: Text(
-            chat.lastMessage.isNotEmpty ? chat.lastMessage : 'جاري التحميل...',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(15),
           ),
-          trailing: Text(
-            _formatTime(chat.lastMessageTime),
-            style: const TextStyle(fontSize: 11, color: Colors.grey),
+          child: ListTile(
+            leading: CircleAvatar(
+              radius: 28,
+              backgroundColor: Colors.green[50],
+              child: Text(
+                otherPhone.isNotEmpty ? otherPhone[0].toUpperCase() : '?',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green),
+              ),
+            ),
+            title: Text(otherPhone, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            subtitle: Text(
+              chat.lastMessage.isNotEmpty ? chat.lastMessage : 'جاري التحميل...',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: Text(
+              _formatTime(chat.lastMessageTime),
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
           ),
         ),
       ),
@@ -1066,7 +1206,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               setModalState(() => isSaving = true);
 
                               try {
-                                final database = ref.read(chatDatabaseProvider);
+                                final database = ref.read(firebaseDatabaseProvider);
                                 await database.ref('users').child(currentUser.id!).update({
                                   'email': newEmail,
                                   'displayName': newName,

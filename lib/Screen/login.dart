@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:ChatApp/Screen/home.dart';
 import 'package:ChatApp/model/user.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -24,7 +27,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   bool _isLoading = false;
   bool _obscurePassword = true;
-  bool _isRegisterMode = false; // ✅ تحولت إلى متابعة وضع الشاشة (تسجيل أم دخول)
+  bool _isRegisterMode = false;
+
+  bool isConnected = false;
+  StreamSubscription? connectionSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    connectionSubscription = InternetConnection().onStatusChange.listen((status) async {
+      final hasConnection = status == InternetStatus.connected;
+
+      if (isConnected != hasConnection) {
+        if (mounted) {
+          setState(() {
+            isConnected = hasConnection;
+          });
+        }
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -32,24 +54,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     phoneController.dispose();
     passwordController.dispose();
     confirmPasswordController.dispose();
+    connectionSubscription?.cancel();
     super.dispose();
   }
 
-  // الموحدة الموحدة الموحدة
+  // ✅ حفظ جلسة المستخدم
   Future<void> _saveUserSession(AppUser user) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isLogin', true);
+    await prefs.setString('phone', user.phone); // ✅ تخزين رقم الهاتف
     await prefs.setString('userEmail', user.email ?? '');
     await prefs.setString('userId', user.id ?? '');
-    await prefs.setString('userName', user.name);
+    await prefs.setString('userName', user.displayName);
 
     ref.read(appUserDataProvider.notifier).state = user;
-    ref.read(appUserPhoneProvider.notifier).state = user.email;
+    ref.read(appUserPhoneProvider.notifier).state = user.phone; // ✅ استخدام رقم الهاتف
   }
 
-  // زر الضغط عند الدخول أو التسجيل الرسمي
+  // ✅ دالة التحقق من الاتصال
   void _submitForm() {
     if (!_formKey.currentState!.validate()) return;
+
+    // ✅ تصحيح: إذا كان لا يوجد اتصال، أظهر رسالة
+    if (!isConnected) {
+      _showSnackBar('لا يوجد اتصال بالإنترنت، تأكد من اتصالك');
+      return;
+    }
 
     if (_isRegisterMode) {
       _handleRegister(
@@ -106,7 +136,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           await FirebaseDatabase.instance
               .ref('users')
               .child(user.id!)
-              .update({'name': displayName.trim()});
+              .update({'displayName': displayName.trim()}); // ✅ استخدام displayName
 
           final updatedUser = AppUser(
             id: user.id,
@@ -176,7 +206,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // الأيقونة المتحركة للشعار
+                        // الأيقونة
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 300),
                           width: _isRegisterMode ? 65 : 80,
@@ -193,7 +223,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                         const SizedBox(height: 15),
 
-                        // النص العنواني المتحرك بسلاسة
+                        // العنوان
                         AnimatedSwitcher(
                           duration: const Duration(milliseconds: 300),
                           child: Text(
@@ -212,7 +242,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                         const SizedBox(height: 25),
 
-                        // حقل الاسم (يظهر فقط في وضع التسجيل بأنيميشن)
+                        // ✅ حقل الاسم (يظهر في وضع التسجيل فقط)
                         if (_isRegisterMode) ...[
                           TextFormField(
                             controller: nameController,
@@ -233,35 +263,42 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           const SizedBox(height: 16),
                         ],
 
-                        // حقل البريد الإلكتروني (مشترك)
+                        // ✅ حقل رقم الهاتف (بدون maxLength)
                         TextFormField(
-                          maxLength: 10,
                           controller: phoneController,
                           keyboardType: TextInputType.phone,
                           enabled: !_isLoading,
                           decoration: InputDecoration(
-                            helperMaxLines: 1,
                             labelText: 'رقم الهاتف',
-                            hintText: '0590000000',
+                            hintText: '0590000000 أو +970590000000',
                             prefixIcon: const Icon(Icons.phone, color: Colors.green),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
+                            helperText: 'أدخل رقم الهاتف بصيغة 059xxxxxxx أو +97059xxxxxxx',
+                            helperMaxLines: 2,
                           ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
                               return 'الرجاء إدخال رقم الهاتف';
                             }
-                            if(value.contains('+') && value.length<14){
-                              return 'رقم الهاتف غير صالح';
-                            }
-                            if (value.length<10) {
-                              return 'رقم الهاتف غير صالح';
+                            // ✅ تنظيف الرقم من المسافات
+                            final cleanPhone = value.trim().replaceAll(' ', '');
+
+                            // ✅ التحقق من صحة الرقم
+                            if (cleanPhone.startsWith('+')) {
+                              if (cleanPhone.length < 12) {
+                                return 'رقم الهاتف غير صالح (يجب أن يكون 12 رقم على الأقل مع +)';
+                              }
+                            } else {
+                              if (cleanPhone.length < 10) {
+                                return 'رقم الهاتف غير صالح (يجب أن يكون 10 أرقام على الأقل)';
+                              }
                             }
                             return null;
                           },
                         ),
                         const SizedBox(height: 16),
 
-                        // حقل كلمة المرور (مشترك)
+                        // حقل كلمة المرور
                         TextFormField(
                           controller: passwordController,
                           obscureText: _obscurePassword,
@@ -313,7 +350,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           const SizedBox(height: 16),
                         ],
 
-                        // نسيت كلمة المرور (تظهر فقط في وضع تسجيل الدخول)
+                        // نسيت كلمة المرور
                         if (!_isRegisterMode)
                           Align(
                             alignment: Alignment.centerLeft,
@@ -324,7 +361,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                         const SizedBox(height: 10),
 
-                        // زر التحكم الرئيسي (تسجيل أو دخول) مع تغيير النص ديناميكياً
+                        // ✅ زر التحكم الرئيسي
                         SizedBox(
                           width: double.infinity,
                           height: 50,
@@ -353,7 +390,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // نص التبديل السفلي بالأنيميشن
+                        // ✅ نص التبديل بين تسجيل الدخول والتسجيل
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -364,13 +401,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   : () {
                                 setState(() {
                                   _isRegisterMode = !_isRegisterMode;
-                                  _formKey.currentState!.reset(); // تنظيف حقول الأخطاء السابقة عند التحويل
+                                  // ✅ تنظيف حقول الأخطاء عند التبديل
+                                  _formKey.currentState?.reset();
                                 });
                               },
                               child: AnimatedSwitcher(
                                 duration: const Duration(milliseconds: 200),
                                 child: Text(
-                                  _isRegisterMode ? 'سجيل الدخول' : 'إنشاء حساب جديد',
+                                  _isRegisterMode ? 'تسجيل الدخول' : 'إنشاء حساب جديد',
                                   key: ValueKey<bool>(_isRegisterMode),
                                   style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
                                 ),
@@ -378,6 +416,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                           ],
                         ),
+
+                        // ✅ عرض حالة الاتصال في الأسفل
+                        if (!isConnected)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.orange[50],
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.orange[200]!),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.wifi_off, size: 16, color: Colors.orange[700]),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'لا يوجد اتصال بالإنترنت',
+                                    style: TextStyle(fontSize: 12, color: Colors.orange[700]),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
