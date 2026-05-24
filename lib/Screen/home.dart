@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:ChatApp/Animation/RouteAnimation.dart';
 import 'package:ChatApp/Combonant/CustomSearchBar.dart';
 import 'package:ChatApp/Provider/chatProvider.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
@@ -16,6 +17,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../Notifications/CacheService.dart';
 import '../model/chat.dart';
 import '../model/user.dart';
+import '../service/ImageUploadService.dart';
 import 'chatScreen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -26,7 +28,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   bool _isLoading = true;
   bool isConnected = false;
   final searchController = TextEditingController();
@@ -35,12 +37,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   late final AdvancedCacheService _cacheService;
   bool _isOfflineMode = false;
 
+  // ✅ متغير لتتبع أول مرة يتم فيها التحميل
+  bool _isFirstLoad = true;
+
   @override
   bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
+
+    // ✅ إضافة مراقب لدورة حياة التطبيق
+    WidgetsBinding.instance.addObserver(this);
 
     _cacheService = AdvancedCacheService();
     _checkUserLoggedIn();
@@ -53,7 +61,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       }
     });
 
-    connectionSubscription = InternetConnection().onStatusChange.listen((status) async {
+    connectionSubscription = InternetConnection().onStatusChange.listen((
+      status,
+    ) async {
       final hasConnection = status == InternetStatus.connected;
 
       if (isConnected != hasConnection) {
@@ -65,7 +75,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
         if (isConnected) {
           print('🌐 عودة الاتصال بالإنترنت');
-          // ✅ فقط إذا كان الـ widget لا يزال موجوداً
           if (mounted) {
             await _retryLoadingAfterConnection();
           }
@@ -75,55 +84,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         }
       }
     });
-  }
 
-  void _checkOfflineMode() {
-    if (!isConnected && _cacheService.hasCachedData()) {
-      setState(() {
-        _isOfflineMode = true;
-      });
-    } else {
-      setState(() {
-        _isOfflineMode = false;
-      });
-    }
-  }
+    // _cacheService = AdvancedCacheService();
 
-  @override
-  void dispose() {
-    connectionSubscription?.cancel();
-    searchController.dispose();
-    _cacheService.dispose();
-    super.dispose();
-  }
-
-  // في _retryLoadingAfterConnection
-  Future<void> _retryLoadingAfterConnection() async {
-    if (!isConnected) return;
-
-    print('🔄 إعادة تحميل البيانات بعد عودة الاتصال...');
-
-    // ✅ التحقق من أن الـ widget لا يزال موجوداً قبل استخدام ref
-    if (!mounted) return;
-
-    final currentUserPhone = ref.read(appUserPhoneProvider);
-    final currentIdUser = await ref.read(authServiceProvider).getUserByPhoneLocal();
-
-    if (currentUserPhone != null) {
-      if (currentIdUser?.id != null) {
-        await ref.read(authServiceProvider).updateUserStatus(currentIdUser!.id!, true);
-      }
-
-      ref.invalidate(chatsProvider(currentUserPhone));
-      ref.invalidate(userDataProvider);
-
-      final freshUser = await ref.read(authServiceProvider).getUserByPhone(currentUserPhone);
-      if (freshUser != null && mounted) {
-        ref.read(appUserDataProvider.notifier).state = freshUser;
-      }
-    }
-
-    _checkOfflineMode();
+    // ✅ تأخير التحقق من تسجيل الدخول قليلاً
+    Future.delayed(Duration.zero, () {
+      _checkUserLoggedIn();
+    });
   }
 
   Future<void> _checkUserLoggedIn() async {
@@ -138,18 +105,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final userName = prefs.getString('userName');
 
       if (phone != null && userId != null && mounted) {
+        // ✅ تصحيح: المستخدم غير متصل حتى يثبت الاتصال
         final localUser = AppUser(
           id: userId,
           phone: phone,
           email: userEmail,
           displayName: userName ?? phone,
-          isOnline: isConnected,
+          isOnline: false, // ✅ غير متصل في البداية
         );
 
         ref.read(appUserDataProvider.notifier).state = localUser;
         ref.read(appUserPhoneProvider.notifier).state = phone;
 
-        print('✅ تم الدخول السريع بنجاح (حالة الاتصال: ${isConnected ? "متصل" : "غير متصل"})');
+        // ✅ إذا كان هناك اتصال، قم بتحديث الحالة
+        if (isConnected) {
+          await ref.read(authServiceProvider).updateUserStatus(userId, true);
+        }
+
+        print('✅ تم الدخول السريع بنجاح');
       } else {
         _navigateToLogin();
       }
@@ -160,12 +133,83 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  @override
+  void dispose() {
+    // ✅ إزالة المراقب
+    WidgetsBinding.instance.removeObserver(this);
+    connectionSubscription?.cancel();
+    searchController.dispose();
+    _cacheService.dispose();
+    super.dispose();
+  }
+
+  // ✅ مراقبة عودة التطبيق إلى الواجهة الأمامية
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed && mounted && isConnected) {
+      // ✅ عند العودة إلى التطبيق، تحديث البيانات
+      final currentUserPhone = ref.read(appUserPhoneProvider);
+      if (currentUserPhone != null) {
+        ref.invalidate(chatsProvider(currentUserPhone));
+      }
+    }
+  }
+
+  void _checkOfflineMode() {
+    if (!isConnected && _cacheService.hasCachedData()) {
+      if (mounted) {
+        setState(() {
+          _isOfflineMode = true;
+        });
+      }
+    } else {
+      if (mounted) {
+        setState(() {
+          _isOfflineMode = false;
+        });
+      }
+    }
+  }
+
+  // ✅ في _retryLoadingAfterConnection
+  Future<void> _retryLoadingAfterConnection() async {
+    if (!isConnected) return;
+
+    print('🔄 إعادة تحميل البيانات بعد عودة الاتصال...');
+
+    if (!mounted) return;
+
+    final currentUserPhone = ref.read(appUserPhoneProvider);
+    final currentIdUser = await ref
+        .read(authServiceProvider)
+        .getUserByPhoneLocal();
+
+    if (currentUserPhone != null) {
+      if (currentIdUser?.id != null) {
+        await ref
+            .read(authServiceProvider)
+            .updateUserStatus(currentIdUser!.id!, true);
+      }
+
+      // ✅ تحديث Providers
+      ref.invalidate(chatsProvider(currentUserPhone));
+      ref.invalidate(userDataProvider);
+
+      final freshUser = await ref
+          .read(authServiceProvider)
+          .getUserByPhone(currentUserPhone);
+      if (freshUser != null && mounted) {
+        ref.read(appUserDataProvider.notifier).state = freshUser;
+      }
+    }
+
+    _checkOfflineMode();
+  }
+
   void _navigateToLogin() {
     if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-      );
+      Navigator.pushReplacement(context, RouteAnimation.fade(LoginScreen()));
     }
   }
 
@@ -174,9 +218,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
     final now = DateTime.now();
 
-    if (date.year == now.year && date.month == now.month && date.day == now.day) {
+    if (date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day) {
       return DateFormat('h:mm a').format(date);
-    } else if (date.year == now.year && date.month == now.month && date.day == now.day - 1) {
+    } else if (date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day - 1) {
       return 'أمس';
     } else if (date.year == now.year && date.month == now.month) {
       return DateFormat('d MMM').format(date);
@@ -199,7 +247,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('تسجيل خروج', style: TextStyle(color: Colors.white)),
+            child: const Text(
+              'تسجيل خروج',
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -222,6 +273,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
       await _cacheService.clearAllCache();
 
+      // ✅ إعادة تعيين المتغيرات
+      _isFirstLoad = true;
+
       ref.read(appUserDataProvider.notifier).state = null;
       ref.read(appUserPhoneProvider.notifier).state = null;
 
@@ -229,9 +283,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } catch (e) {
       print('❌ خطأ في تسجيل الخروج: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ في تسجيل الخروج: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('خطأ في تسجيل الخروج: $e')));
       }
     }
   }
@@ -243,6 +297,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final currentUser = ref.watch(appUserDataProvider);
     final currentUserPhone = ref.watch(appUserPhoneProvider);
 
+    // ✅ تحسين حالة التحميل
     if (_isLoading) {
       return const Scaffold(
         body: Center(
@@ -260,7 +315,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     if (currentUser == null || currentUserPhone == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _navigateToLogin();
+        if (mounted) _navigateToLogin();
       });
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
@@ -275,13 +330,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             const SizedBox(width: 8),
             const Text(
               'المحادثات',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(width: 10),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: isConnected ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
+                color: isConnected
+                    ? Colors.green.withOpacity(0.2)
+                    : Colors.red.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
@@ -290,14 +350,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   Icon(
                     isConnected ? Icons.wifi : Icons.wifi_off,
                     size: 14,
-                    color: isConnected ? Colors.greenAccent : Colors.orangeAccent,
+                    color: isConnected
+                        ? Colors.greenAccent
+                        : Colors.orangeAccent,
                   ),
                   const SizedBox(width: 4),
                   Text(
                     isConnected ? 'متصل' : 'غير متصل',
                     style: TextStyle(
                       fontSize: 11,
-                      color: isConnected ? Colors.greenAccent : Colors.orangeAccent,
+                      color: isConnected
+                          ? Colors.greenAccent
+                          : Colors.orangeAccent,
                     ),
                   ),
                 ],
@@ -328,7 +392,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   children: [
                     Icon(Icons.person, size: 20, color: Colors.black),
                     SizedBox(width: 12),
-                    Text('الملف الشخصي', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(
+                      'الملف الشخصي',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -338,7 +408,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   children: [
                     Icon(Icons.share, size: 20, color: Colors.green),
                     SizedBox(width: 12),
-                    Text('مشاركة التطبيق', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(
+                      'مشاركة التطبيق',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -348,7 +424,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   children: [
                     Icon(Icons.logout, size: 20, color: Colors.red),
                     SizedBox(width: 12),
-                    Text('تسجيل الخروج', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(
+                      'تسجيل الخروج',
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -361,7 +444,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           Column(
             children: [
               Padding(
-                padding: const EdgeInsets.only(top: 12, left: 12, right: 12, bottom: 8),
+                padding: const EdgeInsets.only(
+                  top: 12,
+                  left: 12,
+                  right: 12,
+                  bottom: 8,
+                ),
                 child: CustomSearchBar(
                   controller: searchController,
                   onClear: () {
@@ -379,8 +467,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
               if (!isConnected)
                 Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.orange[50],
                     borderRadius: BorderRadius.circular(10),
@@ -393,7 +487,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       Expanded(
                         child: Text(
                           'لا يوجد اتصال بالإنترنت، يتم عرض الرسائل المحفوظة فقط',
-                          style: TextStyle(fontSize: 12, color: Colors.orange[700]),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.orange[700],
+                          ),
                         ),
                       ),
                     ],
@@ -408,12 +505,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       ref.invalidate(userDataProvider);
                       await _retryLoadingAfterConnection();
                     } else {
-                      Fluttertoast.showToast(msg: 'لا يوجد اتصال بالإنترنت لتحديث البيانات');
+                      Fluttertoast.showToast(
+                        msg: 'لا يوجد اتصال بالإنترنت لتحديث البيانات',
+                      );
                     }
                   },
                   child: chatsAsync.when(
                     data: (chats) {
-                      if (chats.isEmpty && !isConnected && _cacheService.hasCachedData()) {
+                      // ✅ معالجة الحالة عندما تكون chats فارغة ولكن يوجد كاش
+                      if (chats.isEmpty &&
+                          !isConnected &&
+                          _cacheService.hasCachedData()) {
                         final cachedChats = _cacheService.getCachedChats();
                         if (cachedChats.isNotEmpty) {
                           return _buildChatList(cachedChats, currentUserPhone);
@@ -424,21 +526,51 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
                       return _buildChatList(chats, currentUserPhone);
                     },
-                    loading: () => isConnected
-                        ? const Center(child: CircularProgressIndicator(color: Color(0xFF075E54)))
-                        : const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.wifi_off, size: 48, color: Colors.grey),
-                          SizedBox(height: 16),
-                          Text("لا يوجد اتصال بالإنترنت"),
-                          SizedBox(height: 8),
-                          Text("جاري عرض البيانات المخزنة...", style: TextStyle(color: Colors.grey)),
-                        ],
-                      ),
-                    ),
-                    error: (error, stackTrace) => _buildErrorState(error.toString()),
+                    loading: () {
+                      // ✅ تحسين حالة التحميل
+                      if (_cacheService.hasCachedData()) {
+                        final cachedChats = _cacheService.getCachedChats();
+                        if (cachedChats.isNotEmpty) {
+                          return _buildChatList(cachedChats, currentUserPhone);
+                        }
+                      }
+                      return isConnected
+                          ? const Center(
+                              child: CircularProgressIndicator(
+                                color: Color(0xFF075E54),
+                              ),
+                            )
+                          : const Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.wifi_off,
+                                    size: 48,
+                                    color: Colors.grey,
+                                  ),
+                                  SizedBox(height: 16),
+                                  Text("لا يوجد اتصال بالإنترنت"),
+                                  SizedBox(height: 8),
+                                  Text(
+                                    "جاري عرض البيانات المخزنة...",
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                ],
+                              ),
+                            );
+                    },
+                    error: (error, stackTrace) {
+                      print('❌ خطأ في تحميل المحادثات: $error');
+                      // ✅ عرض البيانات من الكاش في حالة الخطأ
+                      if (_cacheService.hasCachedData()) {
+                        final cachedChats = _cacheService.getCachedChats();
+                        if (cachedChats.isNotEmpty) {
+                          return _buildChatList(cachedChats, currentUserPhone);
+                        }
+                      }
+                      return _buildErrorState(error.toString());
+                    },
                   ),
                 ),
               ),
@@ -450,7 +582,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const AddChatScreen()),
+            RouteAnimation.rotateAndFade(AddChatScreen()),
           );
         },
         backgroundColor: const Color(0xFF075E54),
@@ -565,7 +697,8 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
   }
 
   void _copyDownloadLink() async {
-    const link = 'https://play.google.com/store/apps/details?id=com.example.chatapp';
+    const link =
+        'https://play.google.com/store/apps/details?id=com.example.chatapp';
     await Clipboard.setData(const ClipboardData(text: link));
     Fluttertoast.showToast(msg: 'تم نسخ رابط التحميل');
   }
@@ -575,8 +708,10 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
       final otherPhone = chat.getOtherParticipant(currentUserPhone);
       final otherUserAsync = ref.read(userDataProvider(otherPhone));
       final otherUser = otherUserAsync.value;
-      final otherName = otherUser?.displayName.toLowerCase() ?? otherPhone.toLowerCase();
-      return otherName.contains(_searchQuery) || otherPhone.contains(_searchQuery);
+      final otherName =
+          otherUser?.displayName.toLowerCase() ?? otherPhone.toLowerCase();
+      return otherName.contains(_searchQuery) ||
+          otherPhone.contains(_searchQuery);
     }).toList();
 
     if (filteredChats.isEmpty && _searchQuery.isNotEmpty) {
@@ -635,12 +770,8 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
       child: InkWell(
         onTap: () => Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (context) => ChatScreen(
-              chat: chat,
-              receiverPhone: otherPhone,
-              receiverName: otherPhone, // ✅ تمرير رقم الهاتف كاسم مؤقت
-            ),
+          RouteAnimation.slideFromRight(
+            ChatScreen(chat: chat, receiverPhone: otherPhone),
           ),
         ),
         child: Container(
@@ -654,12 +785,21 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
               backgroundColor: Colors.green[50],
               child: Text(
                 otherPhone.isNotEmpty ? otherPhone[0].toUpperCase() : '?',
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green,
+                ),
               ),
             ),
-            title: Text(otherPhone, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            title: Text(
+              otherPhone,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
             subtitle: Text(
-              chat.lastMessage.isNotEmpty ? chat.lastMessage : 'جاري التحميل...',
+              chat.lastMessage.isNotEmpty
+                  ? chat.lastMessage
+                  : 'جاري التحميل...',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -730,15 +870,15 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
 
           if (mounted) {
             ref.invalidate(chatsProvider(currentUserPhone));
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('تم حذف المحادثة')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('تم حذف المحادثة')));
           }
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('خطأ في الحذف: $e')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('خطأ في الحذف: $e')));
             ref.invalidate(chatsProvider(currentUserPhone));
           }
         }
@@ -756,23 +896,34 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
               backgroundColor: Colors.green[50],
               child: imageUrl != null && imageUrl.isNotEmpty
                   ? ClipOval(
-                child: Image.network(
-                  imageUrl,
-                  width: 50,
-                  height: 50,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Text(
-                    name[0].toUpperCase(),
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green),
-                  ),
-                ),
-              )
+                      child: Image.network(
+                        imageUrl,
+                        width: 50,
+                        height: 50,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Text(
+                          name[0].toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green,
+                          ),
+                        ),
+                      ),
+                    )
                   : Text(
-                name[0].toUpperCase(),
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green),
-              ),
+                      name[0].toUpperCase(),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
             ),
-            title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            title: Text(
+              name,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
             subtitle: Text(
               chat.isBlocked ?? false
                   ? '🔒 هذه المحادثة محظورة'
@@ -798,7 +949,9 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                     style: TextStyle(
                       fontSize: 11,
                       color: hasUnread ? const Color(0xFF25D366) : Colors.grey,
-                      fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
+                      fontWeight: hasUnread
+                          ? FontWeight.bold
+                          : FontWeight.normal,
                     ),
                   ),
                   const SizedBox(height: 5),
@@ -809,7 +962,10 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                         color: Color(0xFF25D366),
                         shape: BoxShape.circle,
                       ),
-                      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                      constraints: const BoxConstraints(
+                        minWidth: 20,
+                        minHeight: 20,
+                      ),
                       child: Center(
                         child: Text(
                           '$unreadCount',
@@ -843,8 +999,8 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
               if (context.mounted) {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (context) => ChatScreen(
+                  RouteAnimation.slideFromRight(
+                    ChatScreen(
                       chat: chat,
                       receiverPhone: otherPhone,
                       receiverName: name,
@@ -888,23 +1044,40 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
           Container(
             width: 120,
             height: 120,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.green[50]),
-            child: const Icon(Icons.chat_bubble_outline, size: 60, color: Colors.green),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.green[50],
+            ),
+            child: const Icon(
+              Icons.chat_bubble_outline,
+              size: 60,
+              color: Colors.green,
+            ),
           ),
           const SizedBox(height: 24),
           Text(
             'مرحباً ${currentUser.displayName ?? currentUser.phone}',
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF075E54)),
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF075E54),
+            ),
           ),
           const SizedBox(height: 8),
-          const Text('لا توجد محادثات بعد', style: TextStyle(color: Colors.grey, fontSize: 16)),
+          const Text(
+            'لا توجد محادثات بعد',
+            style: TextStyle(color: Colors.grey, fontSize: 16),
+          ),
           const SizedBox(height: 8),
-          const Text('ابدأ محادثة جديدة الآن', style: TextStyle(color: Colors.grey, fontSize: 14)),
+          const Text(
+            'ابدأ محادثة جديدة الآن',
+            style: TextStyle(color: Colors.grey, fontSize: 14),
+          ),
           const SizedBox(height: 32),
           ElevatedButton.icon(
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const AddChatScreen()),
+              RouteAnimation.slideFromRight(AddChatScreen()),
             ),
             icon: const Icon(Icons.add),
             label: const Text('محادثة جديدة'),
@@ -912,7 +1085,9 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
               backgroundColor: const Color(0xFF075E54),
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(25),
+              ),
             ),
           ),
         ],
@@ -927,11 +1102,18 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
         children: [
           const Icon(Icons.error_outline, size: 64, color: Colors.red),
           const SizedBox(height: 16),
-          const Text('حدث خطأ', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text(
+            'حدث خطأ',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(error, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
+            child: Text(
+              error,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.grey),
+            ),
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
@@ -998,34 +1180,58 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                       ),
                       child: CircleAvatar(
                         radius: 60,
-                        backgroundColor: const Color(0xFF075E54).withOpacity(0.1),
-                        child: Text(
-                          currentUser.displayName.isNotEmpty
-                              ? currentUser.displayName[0].toUpperCase()
-                              : 'U',
-                          style: const TextStyle(
-                            fontSize: 48,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF075E54),
-                          ),
-                        ),
+                        backgroundColor: const Color(
+                          0xFF075E54,
+                        ).withOpacity(0.1),
+                        child: currentUser.imageUrl != null
+                            ? Container(
+                                height: double.infinity,
+                                width: double.infinity,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(60),
+                                  image: DecorationImage(
+                                    fit: BoxFit.cover,
+                                    image: NetworkImage(currentUser.imageUrl!),
+                                  ),
+                                ),
+                              )
+                            : Text(
+                                currentUser.displayName.isNotEmpty
+                                    ? currentUser.displayName[0].toUpperCase()
+                                    : 'U',
+                                style: const TextStyle(
+                                  fontSize: 48,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF075E54),
+                                ),
+                              ),
                       ),
                     ),
                     const SizedBox(height: 20),
                     Text(
                       currentUser.displayName,
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.grey[100],
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
                         currentUser.phone ?? 'رقم الهاتف غير متوفر',
-                        style: TextStyle(fontSize: 14, color: Colors.grey[700], fontFamily: 'monospace'),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[700],
+                          fontFamily: 'monospace',
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -1041,7 +1247,9 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                       label: Text(
                         isConnected ? 'متصل الآن' : 'غير متصل',
                         style: TextStyle(
-                          color: isConnected ? Colors.green[700] : Colors.grey[700],
+                          color: isConnected
+                              ? Colors.green[700]
+                              : Colors.grey[700],
                         ),
                       ),
                       backgroundColor: isConnected
@@ -1058,12 +1266,20 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                               _showEditProfileBottomSheet();
                             },
                             icon: const Icon(Icons.edit, size: 20),
-                            label: const Text('تعديل', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                            label: const Text(
+                              'تعديل',
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.green,
                               side: const BorderSide(color: Colors.green),
                               padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
                           ),
                         ),
@@ -1074,9 +1290,17 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF075E54),
                               padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
-                            child: const Text('إغلاق', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            child: const Text(
+                              'إغلاق',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -1098,7 +1322,9 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
     if (currentUser == null) return;
 
     final nameController = TextEditingController(text: currentUser.displayName);
-    final emailController = TextEditingController(text: currentUser.email ?? '');
+    final emailController = TextEditingController(
+      text: currentUser.email ?? '',
+    );
     bool isSaving = false;
 
     showModalBottomSheet(
@@ -1109,7 +1335,9 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
         return StatefulBuilder(
           builder: (context, setModalState) {
             return Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
               child: Container(
                 decoration: const BoxDecoration(
                   color: Colors.white,
@@ -1118,7 +1346,10 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                     topRight: Radius.circular(25),
                   ),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 16,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1142,6 +1373,76 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                         color: Color(0xFF075E54),
                       ),
                     ),
+
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Column(
+                          children: [
+                            Container(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.green.withOpacity(0.3),
+                                    blurRadius: 5,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                              child: CircleAvatar(
+                                radius: 60,
+                                backgroundColor: const Color(
+                                  0xFF075E54,
+                                ).withOpacity(0.1),
+                                child: currentUser.imageUrl != null
+                                    ? Container(
+                                  height: double.infinity,
+                                  width: double.infinity,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(60),
+                                    image: DecorationImage(
+                                      fit: BoxFit.cover,
+                                      image: NetworkImage(currentUser.imageUrl!),
+                                    ),
+                                  ),
+                                )
+                                    : Text(
+                                  currentUser.displayName.isNotEmpty
+                                      ? currentUser.displayName[0].toUpperCase()
+                                      : 'U',
+                                  style: const TextStyle(
+                                    fontSize: 48,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF075E54),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            InkWell(
+                              onTap: () => _showImagePickerOptions(context, setModalState, (p0) {
+
+                              }, () {
+
+                              }, () {
+
+                              },),
+                              child: Container(
+                                height: 30,
+                                width: 80,
+                                decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(20),
+                                    color: Colors.green
+                                ),
+                                child: Center(child: Text('تعديل',style: TextStyle(color: Colors.white,fontWeight: FontWeight.bold),)),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                      ],
+                    ),
                     const SizedBox(height: 20),
                     TextField(
                       controller: nameController,
@@ -1149,11 +1450,19 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                         labelText: 'اسم المستخدم',
                         labelStyle: const TextStyle(color: Color(0xFF075E54)),
                         hintText: 'أدخل اسمك الجديد',
-                        prefixIcon: const Icon(Icons.person, color: Color(0xFF075E54)),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        prefixIcon: const Icon(
+                          Icons.person,
+                          color: Color(0xFF075E54),
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: Color(0xFF075E54), width: 2),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF075E54),
+                            width: 2,
+                          ),
                         ),
                       ),
                     ),
@@ -1165,11 +1474,19 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                         labelText: 'البريد الإلكتروني',
                         labelStyle: const TextStyle(color: Color(0xFF075E54)),
                         hintText: 'example@email.com',
-                        prefixIcon: const Icon(Icons.email, color: Color(0xFF075E54)),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        prefixIcon: const Icon(
+                          Icons.email,
+                          color: Color(0xFF075E54),
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: Color(0xFF075E54), width: 2),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF075E54),
+                            width: 2,
+                          ),
                         ),
                       ),
                     ),
@@ -1178,75 +1495,122 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: isSaving ? null : () => Navigator.pop(context),
+                            onPressed: isSaving
+                                ? null
+                                : () => Navigator.pop(context),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               side: const BorderSide(color: Colors.grey),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
-                            child: const Text('إلغاء', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+                            child: const Text(
+                              'إلغاء',
+                              style: TextStyle(
+                                color: Colors.black87,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: ElevatedButton(
-                            onPressed: isSaving ? null : () async {
-                              final newName = nameController.text.trim();
-                              final newEmail = emailController.text.trim();
+                            onPressed: isSaving
+                                ? null
+                                : () async {
+                                    final newName = nameController.text.trim();
+                                    final newEmail = emailController.text
+                                        .trim();
 
-                              if (newName.isEmpty) {
-                                Fluttertoast.showToast(msg: 'الاسم لا يمكن أن يكون فارغاً');
-                                return;
-                              }
-                              if (newEmail.isEmpty) {
-                                Fluttertoast.showToast(msg: 'البريد الإلكتروني لا يمكن أن يكون فارغاً');
-                                return;
-                              }
+                                    if (newName.isEmpty) {
+                                      Fluttertoast.showToast(
+                                        msg: 'الاسم لا يمكن أن يكون فارغاً',
+                                      );
+                                      return;
+                                    }
+                                    if (newEmail.isEmpty) {
+                                      Fluttertoast.showToast(
+                                        msg:
+                                            'البريد الإلكتروني لا يمكن أن يكون فارغاً',
+                                      );
+                                      return;
+                                    }
 
-                              setModalState(() => isSaving = true);
+                                    setModalState(() => isSaving = true);
 
-                              try {
-                                final database = ref.read(firebaseDatabaseProvider);
-                                await database.ref('users').child(currentUser.id!).update({
-                                  'email': newEmail,
-                                  'displayName': newName,
-                                });
+                                    try {
+                                      final database = ref.read(
+                                        firebaseDatabaseProvider,
+                                      );
+                                      await database
+                                          .ref('users')
+                                          .child(currentUser.id!)
+                                          .update({
+                                            'email': newEmail,
+                                            'displayName': newName,
+                                          });
 
-                                final prefs = await SharedPreferences.getInstance();
-                                await prefs.setString('userEmail', newEmail);
-                                await prefs.setString('userName', newName);
+                                      final prefs =
+                                          await SharedPreferences.getInstance();
+                                      await prefs.setString(
+                                        'userEmail',
+                                        newEmail,
+                                      );
+                                      await prefs.setString(
+                                        'userName',
+                                        newName,
+                                      );
 
-                                ref.read(appUserDataProvider.notifier).state = currentUser.copyWith(
-                                  displayName: newName,
-                                  email: newEmail,
-                                );
+                                      ref
+                                          .read(appUserDataProvider.notifier)
+                                          .state = currentUser.copyWith(
+                                        displayName: newName,
+                                        email: newEmail,
+                                      );
 
-                                Fluttertoast.showToast(msg: 'تم تحديث البيانات بنجاح');
+                                      Fluttertoast.showToast(
+                                        msg: 'تم تحديث البيانات بنجاح',
+                                      );
 
-                                if (context.mounted) {
-                                  Navigator.pop(context);
-                                }
-                              } catch (e) {
-                                print('❌ خطأ أثناء تحديث البيانات: $e');
-                                Fluttertoast.showToast(msg: 'حدث خطأ أثناء حفظ البيانات');
-                              } finally {
-                                if (context.mounted) {
-                                  setModalState(() => isSaving = false);
-                                }
-                              }
-                            },
+                                      if (context.mounted) {
+                                        Navigator.pop(context);
+                                      }
+                                    } catch (e) {
+                                      print('❌ خطأ أثناء تحديث البيانات: $e');
+                                      Fluttertoast.showToast(
+                                        msg: 'حدث خطأ أثناء حفظ البيانات',
+                                      );
+                                    } finally {
+                                      if (context.mounted) {
+                                        setModalState(() => isSaving = false);
+                                      }
+                                    }
+                                  },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF075E54),
                               padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
                             child: isSaving
                                 ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                            )
-                                : const Text('حفظ', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text(
+                                    'حفظ',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                           ),
                         ),
                       ],
@@ -1260,5 +1624,77 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
         );
       },
     );
+  }
+  // ✅ دالة عرض خيارات اختيار الصورة
+  void _showImagePickerOptions(
+      BuildContext context,
+      Function setModalState,
+      Function(String) onImageUploaded,
+      Function onUploadStart,
+      Function onUploadEnd,
+      ) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: Colors.green),
+              title: const Text('اختيار من المعرض', style: TextStyle(fontWeight: FontWeight.w500)),
+              onTap: () async {
+                Navigator.pop(context);
+                await _pickAndUploadImage(false, setModalState, onImageUploaded, onUploadStart, onUploadEnd);
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: Colors.green),
+              title: const Text('التقاط صورة', style: TextStyle(fontWeight: FontWeight.w500)),
+              onTap: () async {
+                Navigator.pop(context);
+                await _pickAndUploadImage(true, setModalState, onImageUploaded, onUploadStart, onUploadEnd);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+// ✅ دالة اختيار الصورة ورفعها
+  Future<void> _pickAndUploadImage(
+      bool fromCamera,
+      Function setModalState,
+      Function(String) onImageUploaded,
+      Function onUploadStart,
+      Function onUploadEnd,
+      ) async {
+    onUploadStart();
+
+    try {
+      final imageService = ImageUploadService();
+      final imageFile = await imageService.pickImage(fromCamera: fromCamera);
+
+      if (imageFile != null) {
+        final imageUrl = await imageService.uploadImage(imageFile);
+        if (imageUrl != null && imageUrl.isNotEmpty) {
+          onImageUploaded(imageUrl);
+          //_showSuccessSnackBar('تم رفع الصورة بنجاح');
+        } else {
+         // _showErrorSnackBar('فشل رفع الصورة، حاول مرة أخرى');
+        }
+      }
+    } catch (e) {
+      print('❌ خطأ في رفع الصورة: $e');
+      //_showErrorSnackBar('حدث خطأ: ${e.toString()}');
+    } finally {
+      onUploadEnd();
+    }
   }
 }

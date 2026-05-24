@@ -41,6 +41,11 @@ class _AddChatScreenState extends ConsumerState<AddChatScreen> {
     try {
       final chatService = ref.read(chatServiceProvider);
       final receiverPhone = receiverController.text.trim();
+
+      if(receiverPhone.contains(currentUser.phone) || receiverPhone==currentUser.phone){
+        _showSnackBar('لا يمكن ان تنشء محادثة مع نفسك');
+        return;
+      }
       
       // إنشاء محادثة جديدة
       final chatId = await chatService.createChat(

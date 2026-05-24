@@ -39,6 +39,7 @@ class AppUser {
     String? phone,
     String? email,
     bool? isOnline,
+    String? imageUrl
   }) {
     return AppUser(
       id: id ?? this.id,
@@ -46,6 +47,7 @@ class AppUser {
       email:this.email,
       phone: phone ?? this.phone,
       isOnline: isOnline ?? this.isOnline,
+      imageUrl: imageUrl ?? this.imageUrl
     );
   }
 
@@ -55,7 +57,7 @@ class AppUser {
       email: map['email'] ?? '',
       phone: map['phone'] ?? '',
       displayName: map['displayName'] ?? '',
-      imageUrl: map['imageUrl'],
+      imageUrl: map['imageUrl'] ?? 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRGa70BgePn1Rsf41oiG6ac0_TAzpKXj4d9qg&s',
       isOnline: map['isOnline'] ?? false,
       lastSeen: map['lastSeen'] ?? 0,
       password: map['password'] ?? ''

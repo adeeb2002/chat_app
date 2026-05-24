@@ -3,7 +3,7 @@ import 'package:hive/hive.dart';
 part 'HiveChat.g.dart';
 
 
-@HiveType(typeId: 1)
+@HiveType(typeId: 0)
 class HiveChat {
   @HiveField(0)
   final String id;
@@ -37,6 +37,9 @@ class HiveChat {
 
   @HiveField(10)
   final String? blockedBy;
+  @HiveField(11)
+  final dynamic unreadCount;
+
 
   HiveChat({
     required this.id,
@@ -50,5 +53,6 @@ class HiveChat {
     this.clearedFor,
     this.isBlocked = false,
     this.blockedBy,
+    this.unreadCount,
   });
 }

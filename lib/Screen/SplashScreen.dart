@@ -1,11 +1,11 @@
-// lib/screens/splash_screen.dart
+// lib/screens/splash_simple.dart
 
 import 'dart:async';
+import 'package:ChatApp/Animation/RouteAnimation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../Notifications/notifications.dart';
+
 import '../Provider/userProvide.dart';
 import 'home.dart';
 import 'login.dart';
@@ -19,133 +19,101 @@ class SplashScreen extends ConsumerStatefulWidget {
 
 class _SplashScreenState extends ConsumerState<SplashScreen>
     with SingleTickerProviderStateMixin {
-  late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _scaleAnimation;
-  late Animation<Offset> _slideAnimation;
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  bool _hasNavigated = false;
 
   @override
   void initState() {
     super.initState();
-    _setupAnimations();
-    _navigateToNextScreen();
-    _checkAuthState();
-  }
+    _checkLoginStatus();
 
-  bool _isChecking = true;
-  bool _isLoggedIn = false;
-
-
-  Future<void> _checkAuthState() async {
-    try {
-      final authService = ref.read(authServiceProvider);
-      final isLoggedIn = await authService.checkLogin();
-      final bool isConnected = await InternetConnection().hasInternetAccess;
-
-      setState(() {
-        _isLoggedIn = isLoggedIn;
-        _isChecking = false;
-      });
-
-      if (!isConnected && isLoggedIn) {
-        if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (context) => HomeScreen()),
-                (route) => false,
-          );
-        }
-      }
-
-      if (isLoggedIn) {
-        final prefs = await SharedPreferences.getInstance();
-        final userEmail = prefs.getString('userEmail');
-
-        if (userEmail != null) {
-          final user = await authService.getUserByPhone(userEmail);
-
-          if (user != null && mounted) {
-            ref.read(appUserDataProvider.notifier).state = user;
-            ref.read(appUserPhoneProvider.notifier).state = user.email;
-            ref.read(isLoadingProvider.notifier).state = true;
-
-            // ✅ تسجيل المستخدم في OneSignal
-            try {
-              await NotificationService().loginUser(user.phone);
-              print('✅ تم تسجيل ${user.email} في OneSignal');
-            } catch (e) {
-              print('❌ خطأ في تسجيل OneSignal: $e');
-            }
-          }
-        }
-      }
-    } catch (e) {
-      print('❌ خطأ في فحص حالة المصادقة: $e');
-      setState(() {
-        _isChecking = false;
-      });
-    }
-  }
-
-  void _setupAnimations() {
-    _animationController = AnimationController(
+    _controller = AnimationController(
+      duration: const Duration(seconds: 2),
       vsync: this,
-      duration: const Duration(milliseconds: 2000),
     );
 
-    // تأثير التلاشي
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
-      ),
+    _animation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
     );
 
-    // تأثير التكبير
-    _scaleAnimation = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.0, 0.5, curve: Curves.easeOutBack),
-      ),
-    );
+    _controller.forward();
 
-    // تأثير الانزلاق
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.5),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: const Interval(0.3, 0.8, curve: Curves.easeOut),
-      ),
-    );
-
-    _animationController.forward();
+    _navigateAfterDelay();
   }
 
-  Future<void> _navigateToNextScreen() async {
-    // الانتظار لمدة 3 ثواني مع الأنيميشن
+  Future<void> _navigateAfterDelay() async {
     await Future.delayed(const Duration(seconds: 3));
 
-    if (!mounted) return;
+    if (_hasNavigated || !mounted) return;
+    _hasNavigated = true;
 
-    // التحقق من حالة تسجيل الدخول
     final prefs = await SharedPreferences.getInstance();
     final isLoggedIn = prefs.getBool('isLogin') ?? false;
     final userPhone = prefs.getString('phone');
 
     if (mounted) {
       if (isLoggedIn && userPhone != null && userPhone.isNotEmpty) {
-        // مستخدم مسجل دخول → انتقل إلى الرئيسية
-        Navigator.pushReplacement(
+        Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
+          RouteAnimation.slideFromRight(HomeScreen()),(route) => false,
         );
       } else {
-        // مستخدم غير مسجل دخول → انتقل إلى تسجيل الدخول
+        Navigator.pushAndRemoveUntil(
+          context,
+          RouteAnimation.slideRightAndFade(LoginScreen()),(route) => false,
+        );
+      }
+    }
+  }
+  Future<void> _checkLoginStatus() async {
+    await Future.delayed(const Duration(milliseconds: 2500));
+
+    if (_hasNavigated || !mounted) return;
+    _hasNavigated = true;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final isLoggedIn = prefs.getBool('isLogin') ?? false;
+      final userPhone = prefs.getString('phone');
+      final userId = prefs.getString('userId');
+
+      // ✅ تصحيح حالة المستخدم عند بدء التطبيق
+      if (isLoggedIn && userPhone != null && userId != null) {
+        final authService = ref.read(authServiceProvider);
+
+        // ✅ تعيين المستخدم كـ "غير متصل" مؤقتاً
+        await authService.updateUserStatus(userId, false);
+
+        // ✅ بعد ثانية، إذا كان هناك اتصال، قم بتعيينه كـ "متصل"
+        Future.delayed(const Duration(seconds: 2), () {
+          if (authService.isConnected) {
+            authService.updateUserStatus(userId, true);
+          }
+        });
+      }
+
+      if (mounted) {
+        if (isLoggedIn && userPhone != null && userPhone.isNotEmpty) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const HomeScreen()),
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const LoginScreen()),
+          );
+        }
+      }
+    } catch (e) {
+      print('❌ [Splash] خطأ: $e');
+      if (mounted && !_hasNavigated) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
         );
       }
     }
@@ -153,222 +121,73 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   @override
   void dispose() {
-    _animationController.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isChecking) {
-      return const MaterialApp(
-        debugShowCheckedModeBanner: false,
-        home: Scaffold(body: Center(child: CircularProgressIndicator())),
-      );
-    }
-
-
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF075E54), // اللون الأخضر الداكن
-              Color(0xFF128C7E), // اللون الأخضر المتوسط
-              Color(0xFF25D366), // اللون الأخضر الفاتح
-            ],
+            colors: [Color(0xFF075E54), Color(0xFF25D366)],
           ),
         ),
-        child: Stack(
-          children: [
-            // خلفية متحركة (دوائر متحركة)
-            _buildAnimatedBackground(),
-
-            // المحتوى الرئيسي
-            Center(
-              child: FadeTransition(
-                opacity: _fadeAnimation,
-                child: ScaleTransition(
-                  scale: _scaleAnimation,
-                  child: SlideTransition(
-                    position: _slideAnimation,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        // الأيقونة الرئيسية
-                        Container(
-                          width: 140,
-                          height: 140,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.2),
-                                blurRadius: 30,
-                                spreadRadius: 5,
-                                offset: const Offset(0, 10),
-                              ),
-                            ],
-                          ),
-                          child: const Center(
-                            child: Icon(
-                              Icons.chat_bubble,
-                              size: 80,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-
-                        // اسم التطبيق
-                        ShaderMask(
-                          shaderCallback: (bounds) => const LinearGradient(
-                            colors: [Colors.white, Colors.white70],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ).createShader(bounds),
-                          child: const Text(
-                            'ChatApp',
-                            style: TextStyle(
-                              fontSize: 42,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              letterSpacing: 2,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-
-                        // الشعار الفرعي
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(30),
-                          ),
-                          child: const Text(
-                            'تواصل بكل سهولة',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+        child: Center(
+          child: ScaleTransition(
+            scale: _animation,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.chat_bubble,
+                    size: 60,
+                    color: Colors.white,
                   ),
                 ),
-              ),
+                const SizedBox(height: 30),
+                const Text(
+                  'ChatApp',
+                  style: TextStyle(
+                    fontSize: 36,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    letterSpacing: 2,
+                  ),
+                ),
+                const SizedBox(height: 15),
+                Container(
+                  width: 50,
+                  height: 2,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                ),
+                const SizedBox(height: 15),
+                const Text(
+                  'تواصل بكل سهولة',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.white70,
+                    fontWeight: FontWeight.bold
+                  ),
+                ),
+              ],
             ),
-
-            // مؤشر التحميل في الأسفل
-            Positioned(
-              bottom: 50,
-              left: 0,
-              right: 0,
-              child: AnimatedBuilder(
-                animation: _animationController,
-                builder: (context, child) {
-                  return Opacity(
-                    opacity: _animationController.value,
-                    child: const Column(
-                      children: [
-                        SizedBox(
-                          width: 30,
-                          height: 30,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        ),
-                        SizedBox(height: 10),
-                        Text(
-                          'جاري التحميل...',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
+          ),
         ),
       ),
-    );
-  }
-
-  Widget _buildAnimatedBackground() {
-    return TweenAnimationBuilder(
-      tween: Tween<double>(begin: 0, end: 1),
-      duration: const Duration(seconds: 5),
-      builder: (context, value, child) {
-        return Stack(
-          children: [
-            // دائرة 1
-            Positioned(
-              top: -50 + (value * 20),
-              left: -50 + (value * 30),
-              child: Container(
-                width: 150,
-                height: 150,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-            // دائرة 2
-            Positioned(
-              top: 100 + (value * 15),
-              right: -80 + (value * 25),
-              child: Container(
-                width: 200,
-                height: 200,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-            // دائرة 3
-            Positioned(
-              bottom: 50 + (value * 10),
-              left: -30 + (value * 20),
-              child: Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-            // دائرة 4
-            Positioned(
-              bottom: 150,
-              right: 50,
-              child: Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
     );
   }
 }

@@ -94,6 +94,29 @@ final chatsProvider = StreamProvider.family<List<Chat>, String>((ref, userPhone)
       print('   - المحذوفة للمستخدم: ${deletedFor.containsKey(userPhone)}');
 
       if (participants.contains(userPhone) && !deletedFor.containsKey(userPhone)) {
+
+        // ✅ المعالجة الصحيحة والآمنة لـ unreadCount
+        dynamic unreadCountValue = chatMap['unreadCount'];
+        dynamic finalUnreadCount;
+
+        if (unreadCountValue == null) {
+          // ✅ إذا كانت null، نستخدم Map فارغ
+          finalUnreadCount = <String, dynamic>{};
+          print('   - unreadCount هو null، استخدام Map فارغ');
+        } else if (unreadCountValue is Map) {
+          // ✅ إذا كان Map، نحتفظ به
+          finalUnreadCount = Map<String, dynamic>.from(unreadCountValue);
+          print('   - unreadCount هو Map: $finalUnreadCount');
+        } else if (unreadCountValue is int) {
+          // ✅ إذا كان int، نحوله إلى Map (للتوافق)
+          finalUnreadCount = unreadCountValue;
+          print('   - unreadCount هو int: $finalUnreadCount');
+        } else {
+          // ✅ أي نوع آخر، نستخدم 0
+          finalUnreadCount = 0;
+          print('   - unreadCount نوع غير معروف، استخدام 0');
+        }
+
         final chat = Chat(
           id: chatId.toString(),
           participants: participants,
@@ -107,9 +130,7 @@ final chatsProvider = StreamProvider.family<List<Chat>, String>((ref, userPhone)
           isBlocked: chatMap['isBlocked'] ?? false,
           blockedBy: chatMap['blockedBy'],
           isDeletedChatForYou: deletedFor.containsKey(userPhone),
-          unreadCount: chatMap['unreadCount'] is Map
-              ? Map<String, dynamic>.from(chatMap['unreadCount'])
-              : (chatMap['unreadCount'] ?? 0),
+          unreadCount: finalUnreadCount,
         );
 
         chats.add(chat);
@@ -207,7 +228,7 @@ class ChatService {
         'clearedFor': {},
         'isBlocked': false,
         'blockedBy': null,
-        'unreadCount': {},
+        'unreadCount': {}, // ✅ Map فارغ
       });
 
       print('✅ تم إنشاء المحادثة بنجاح: $chatId');
@@ -266,8 +287,12 @@ class ChatService {
     }
   }
 
-  Future<void> clearChat(String chatId) async {
+  /// مسح رسائل المحادثة للمستخدم الحالي فقط (وليس للجميع)
+  Future<void> clearChatForUser(String chatId, String currentUserPhone) async {
     try {
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      print('🗑️ بدء مسح رسائل المحادثة للمستخدم: $currentUserPhone');
+
       final chatRef = db.ref('chats').child(chatId);
       final snapshot = await chatRef.get();
 
@@ -275,19 +300,67 @@ class ChatService {
         throw Exception('المحادثة غير موجودة');
       }
 
+      final cleanUserKey = currentUserPhone.replaceAll('+', 'p');
+
+      // ✅ 1. إضافة المستخدم إلى قائمة clearedFor (الرسائل التي تم مسحها له)
+      final chatData = snapshot.value as Map<dynamic, dynamic>?;
+      final clearedFor = Map<String, dynamic>.from(chatData?['clearedFor'] ?? {});
+      clearedFor[cleanUserKey] = DateTime.now().millisecondsSinceEpoch;
+
+      // ✅ 2. إزالة المستخدم من unreadCount
+      final unreadCount = Map<String, dynamic>.from(chatData?['unreadCount'] ?? {});
+      unreadCount.remove(cleanUserKey);
+
+      // ✅ 3. تحديث المحادثة
+      final now = DateTime.now().millisecondsSinceEpoch;
+
+      await chatRef.update({
+        'clearedFor': clearedFor,        // ✅ تسجيل أن المستخدم مسح الرسائل
+        'unreadCount': unreadCount,      // ✅ إزالة العداد الخاص به
+        'updatedAt': now,
+        'clearedAt': now,
+      });
+
+      print('✅ تم مسح رسائل المحادثة للمستخدم $currentUserPhone');
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    } catch (e) {
+      print('❌ خطأ في مسح رسائل المحادثة: $e');
+      rethrow;
+    }
+  }
+
+  /// مسح جميع رسائل المحادثة للجميع (سيتم حذف المحادثة بالكامل)
+  Future<void> clearChatForEveryone(String chatId) async {
+    try {
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      print('🗑️ بدء مسح رسائل المحادثة للجميع: $chatId');
+
+      final chatRef = db.ref('chats').child(chatId);
+      final snapshot = await chatRef.get();
+
+      if (!snapshot.exists) {
+        throw Exception('المحادثة غير موجودة');
+      }
+
+      // ✅ 1. حذف جميع رسائل المحادثة
       final messagesRef = chatRef.child('messages');
       await messagesRef.remove();
+      print('✅ تم حذف جميع الرسائل');
 
+      // ✅ 2. تحديث بيانات المحادثة
       final now = DateTime.now().millisecondsSinceEpoch;
+
       await chatRef.update({
         'lastMessage': '',
         'lastMessageTime': now,
         'lastMessageSender': '',
         'updatedAt': now,
         'clearedAt': now,
+        'unreadCount': {},  // ✅ إعادة تعيين العداد
       });
 
-      print('✅ تم مسح جميع رسائل المحادثة: $chatId');
+      print('✅ تم مسح جميع رسائل المحادثة للجميع');
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     } catch (e) {
       print('❌ خطأ في مسح رسائل المحادثة: $e');
       rethrow;

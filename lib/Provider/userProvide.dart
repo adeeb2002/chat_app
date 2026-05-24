@@ -1,6 +1,8 @@
-import 'dart:async';
+// lib/Provider/userProvide.dart
 
-import 'package:ChatApp/Screen/home.dart';
+import 'dart:async';
+import 'package:ChatApp/Provider/chatProvider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -9,7 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../Notifications/notifications.dart';
 import '../model/user.dart';
 
-// ✅ إعادة تسمية الـ Providers بشكل واضح
+// Providers
 final appUserDataProvider = StateProvider<AppUser?>((ref) => null);
 final appUserPhoneProvider = StateProvider<String?>((ref) => null);
 final isLoadingProvider = StateProvider<bool>((ref) => false);
@@ -17,79 +19,119 @@ final isLoginProvider = StateProvider<bool>((ref) => false);
 final currentReceiverProvider = StateProvider<AppUser?>((ref) => null);
 final internetConnectionProvider = StateProvider<bool>((ref) => true);
 
-// ✅ authServiceProvider
 final authServiceProvider = Provider<AuthService>((ref) {
   final db = FirebaseDatabase.instance;
-  final connection = ref.watch(internetConnectionProvider);
-  return AuthService(db, connection);
+  return AuthService(db);
 });
 
-// Stream Provider للمستخدم
 final currentUserStreamProvider = StreamProvider<AppUser?>((ref) {
   final service = ref.watch(authServiceProvider);
   return service.watchCurrentUser();
 });
 
-// Provider لجلب بيانات مستخدم
-final userDataProvider = FutureProvider.family<AppUser?, String>((
-    ref,
-    phone,
-    ) async {
+final userDataProvider = FutureProvider.family<AppUser?, String>((ref, phone) async {
   final service = ref.watch(authServiceProvider);
   return await service.getUserByPhone(phone);
 });
 
 class AuthService {
   final FirebaseDatabase db;
-  bool isConnected;
+  bool isConnected = true;
   StreamSubscription? _connectionSubscription;
   String? _currentUserId;
 
-  // ✅ StreamController لإعلام التغييرات
-  final StreamController<bool> _connectionController = StreamController<bool>.broadcast();
-  Stream<bool> get connectionStream => _connectionController.stream;
+  // ✅ متغير لتتبع حالة المستخدم في Firebase
+  bool _isUserOnlineInFirebase = false;
+  Timer? _onlineStatusTimer;
 
-  AuthService(this.db, this.isConnected) {
+  AuthService(this.db) {
     _initConnectionListener();
+    _setupLifecycleObserver();
+    _startOnlineStatusPing();
   }
 
-  // ✅ تهيئة مستمع الاتصال (مرة واحدة فقط)
+  // ✅ مراقبة حالة الاتصال
   void _initConnectionListener() {
     _connectionSubscription = InternetConnection().onStatusChange.listen((status) async {
       final hasConnection = status == InternetStatus.connected;
 
       if (isConnected != hasConnection) {
         isConnected = hasConnection;
-        _connectionController.add(isConnected);
-
         print('🌐 حالة الاتصال تغيرت: ${isConnected ? "متصل" : "غير متصل"}');
 
-        // ✅ عند عودة الاتصال، قم بتحديث حالة المستخدم في Firebase
         if (isConnected && _currentUserId != null) {
           await updateUserStatus(_currentUserId!, true);
+        } else if (_currentUserId != null) {
+          await updateUserStatus(_currentUserId!, false);
         }
-
-        // ✅ حفظ الحالة محلياً
-        await saveUserStatusLocally(isConnected);
       }
     });
   }
 
-  // ✅ الحصول على حالة الاتصال الحالية
-  bool getConnectionStatus() {
-    return isConnected;
+  // ✅ مراقبة دورة حياة التطبيق
+  void _setupLifecycleObserver() {
+    if (WidgetsBinding.instance != null) {
+      WidgetsBinding.instance.addObserver(AppLifecycleObserver(this));
+    }
   }
 
-  // ✅ إيقاف المستمع عند الحاجة
-  void dispose() {
-    _connectionSubscription?.cancel();
-    _connectionController.close();
+  // ✅ إرسال نبضات (Ping) لتحديث حالة المستخدم بشكل دوري
+  void _startOnlineStatusPing() {
+    _onlineStatusTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
+      if (_currentUserId != null && isConnected) {
+        await db.ref('users').child(_currentUserId!).update({
+          'lastSeen': DateTime.now().millisecondsSinceEpoch,
+          'isOnline': true,
+        });
+        print('💓 Ping: تم تحديث حالة المستخدم');
+      }
+    });
+  }
+
+  // ✅ تحديث حالة المستخدم في Firebase
+  Future<void> updateUserStatus(String userId, bool isOnline) async {
+    try {
+      if (isConnected) {
+        await db.ref('users').child(userId).update({
+          'isOnline': isOnline,
+          'lastSeen': DateTime.now().millisecondsSinceEpoch,
+        });
+        _isUserOnlineInFirebase = isOnline;
+        print('✅ تم تحديث حالة المستخدم في Firebase: $isOnline');
+      }
+
+      // ✅ حفظ الحالة محلياً
+      await saveUserStatusLocally(isOnline);
+    } catch (e) {
+      print('❌ خطأ في تحديث الحالة: $e');
+    }
+  }
+
+  // ✅ حفظ حالة المستخدم محلياً
+  Future<void> saveUserStatusLocally(bool isOnline) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('isUserOnline', isOnline);
+      await prefs.setInt('lastSeen', DateTime.now().millisecondsSinceEpoch);
+      print('✅ تم حفظ الحالة محلياً: $isOnline');
+    } catch (e) {
+      print('❌ خطأ في حفظ الحالة محلياً: $e');
+    }
+  }
+
+  // ✅ استعادة الحالة المحلية عند بدء التطبيق
+  Future<bool> getLocalUserStatus() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool('isUserOnline') ?? false;
+    } catch (e) {
+      return false;
+    }
   }
 
   Stream<AppUser?> watchCurrentUser() {
-    return Stream.periodic(const Duration(seconds: 2), (_) async {
+    return Stream.periodic(const Duration(seconds: 3), (_) async {
       final isLoggedIn = await checkLogin();
-
       if (isLoggedIn && _currentUserId != null) {
         return await getUserById(_currentUserId!);
       }
@@ -97,17 +139,9 @@ class AuthService {
     }).asyncMap((event) => event);
   }
 
-  Future<AppUser?> login(
-      String phone,
-      String password,
-      BuildContext context,
-      ) async {
+  Future<AppUser?> login(String phone, String password, BuildContext context) async {
     try {
-      final snapshot = await db
-          .ref('users')
-          .orderByChild('phone')
-          .equalTo(phone)
-          .get();
+      final snapshot = await db.ref('users').orderByChild('phone').equalTo(phone).get();
 
       print('snapshot data : $snapshot.value');
 
@@ -117,8 +151,6 @@ class AuthService {
           final entry = data.entries.first;
           final userId = entry.key.toString();
           final userData = Map<String, dynamic>.from(entry.value);
-
-          print('${userData['phone']} - ${userData['password']}');
 
           if (userData['password'] == password) {
             final user = AppUser(
@@ -133,16 +165,11 @@ class AuthService {
 
             _currentUserId = userId;
 
-            // ✅ فقط إذا كان هناك اتصال، قم بتحديث الحالة في Firebase
-            if (isConnected) {
-              await updateUserStatus(userId, true);
-            }
-
+            // ✅ تحديث الحالة في Firebase
+            await updateUserStatus(userId, true);
             await _saveLoginState(true, user);
             await Future.delayed(const Duration(milliseconds: 500));
             await NotificationService().loginUser(user.phone);
-
-            Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) =>HomeScreen()), (route) => false,);
 
             return user;
           } else {
@@ -150,7 +177,6 @@ class AuthService {
           }
         }
       }
-      print('phone: $phone');
       return await register(phone, password, context);
     } catch (e) {
       print('❌ خطأ في تسجيل الدخول: $e');
@@ -158,17 +184,9 @@ class AuthService {
     }
   }
 
-  Future<AppUser?> register(
-      String phone,
-      String password,
-      BuildContext context,
-      ) async {
+  Future<AppUser?> register(String phone, String password, BuildContext context) async {
     try {
-      final response = await FirebaseDatabase.instance
-          .ref('users')
-          .orderByChild('phone')
-          .equalTo(phone)
-          .get();
+      final response = await db.ref('users').orderByChild('phone').equalTo(phone).get();
 
       if (response.exists) {
         print('الرقم موجود من قبل، جاري تسجيل الدخول...');
@@ -182,17 +200,16 @@ class AuthService {
         email: 'example@gmail.com',
         phone: phone,
         displayName: phone,
-        isOnline: isConnected, // ✅ استخدام حالة الاتصال الحالية
+        isOnline: true,
         lastSeen: DateTime.now().millisecondsSinceEpoch,
         password: password,
       );
 
       await newUserRef.set(newUser.toMap());
       _currentUserId = newUserRef.key;
+      await updateUserStatus(_currentUserId!, true);
       await _saveLoginState(true, newUser);
       await NotificationService().loginUser(newUser.phone);
-
-      Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) =>HomeScreen()), (route) => false,);
 
       return newUser;
     } catch (e) {
@@ -212,14 +229,8 @@ class AuthService {
     }
   }
 
-  Future<void> saveUserStatusLocally(bool isOnline) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('isUserOnline', isOnline);
-    await prefs.setInt('lastSeen', DateTime.now().millisecondsSinceEpoch);
-  }
-
   Future<void> logout() async {
-    if (_currentUserId != null && isConnected) {
+    if (_currentUserId != null) {
       await updateUserStatus(_currentUserId!, false);
     }
 
@@ -234,27 +245,6 @@ class AuthService {
     await NotificationService().logoutUser();
 
     print('✅ تم تسجيل الخروج بنجاح');
-  }
-
-  // ✅ تحديث حالة المستخدم (متصل/غير متصل) في Firebase
-  Future<void> updateUserStatus(String userId, bool isOnline) async {
-    try {
-      // ✅ فقط إذا كان هناك اتصال، قم بتحديث Firebase
-      if (isConnected) {
-        await db.ref('users').child(userId).update({
-          'isOnline': isOnline,
-          'lastSeen': DateTime.now().millisecondsSinceEpoch,
-        });
-        print('✅ تم تحديث حالة المستخدم في Firebase: $isOnline');
-      } else {
-        print('⚠️ لا يوجد اتصال، تم حفظ الحالة محلياً فقط');
-      }
-
-      // ✅ دائماً قم بحفظ الحالة محلياً
-      await saveUserStatusLocally(isOnline);
-    } catch (e) {
-      print('❌ خطأ في تحديث الحالة: $e');
-    }
   }
 
   Future<bool> checkLogin() async {
@@ -279,11 +269,7 @@ class AuthService {
     if (phone == null || phone.isEmpty) return null;
 
     try {
-      final snapshot = await db
-          .ref('users')
-          .orderByChild('phone')
-          .equalTo(phone)
-          .get();
+      final snapshot = await db.ref('users').orderByChild('phone').equalTo(phone).get();
 
       if (snapshot.exists) {
         final data = snapshot.value as Map<dynamic, dynamic>;
@@ -305,11 +291,7 @@ class AuthService {
     if (phone == null || phone.isEmpty) return null;
 
     try {
-      final snapshot = await db
-          .ref('users')
-          .orderByChild('phone')
-          .equalTo(phone)
-          .get();
+      final snapshot = await db.ref('users').orderByChild('phone').equalTo(phone).get();
 
       if (snapshot.exists) {
         final data = snapshot.value as Map<dynamic, dynamic>;
@@ -342,12 +324,7 @@ class AuthService {
     }
   }
 
-  Future<void> updateUserProfile(
-      String userId, {
-        String? name,
-        String? email,
-        String? imageUrl,
-      }) async {
+  Future<void> updateUserProfile(String userId, {String? name, String? email, String? imageUrl}) async {
     try {
       final updates = <String, dynamic>{};
       if (email != null) updates['email'] = email;
@@ -363,11 +340,7 @@ class AuthService {
     }
   }
 
-  Future<bool> changePassword(
-      String userId,
-      String oldPassword,
-      String newPassword,
-      ) async {
+  Future<bool> changePassword(String userId, String oldPassword, String newPassword) async {
     try {
       final snapshot = await db.ref('users').child(userId).get();
 
@@ -403,9 +376,7 @@ class AuthService {
         for (var chatEntry in chats.entries) {
           final chatId = chatEntry.key.toString();
           final chatData = Map<String, dynamic>.from(chatEntry.value);
-          final participants = List<String>.from(
-            chatData['participants'] ?? [],
-          );
+          final participants = List<String>.from(chatData['participants'] ?? []);
 
           if (participants.contains(userId)) {
             await db.ref('chats').child(chatId).update({
@@ -428,23 +399,61 @@ class AuthService {
       return false;
     }
   }
+
+  void dispose() {
+    _connectionSubscription?.cancel();
+    _onlineStatusTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(AppLifecycleObserver(this));
+  }
 }
 
-// ✅ Provider مساعد لمراقبة حالة تسجيل الدخول
+// ✅ مراقب دورة حياة التطبيق
+class AppLifecycleObserver with WidgetsBindingObserver {
+  final AuthService authService;
+
+  AppLifecycleObserver(this.authService);
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    print('📱 دورة حياة التطبيق: $state');
+
+    switch (state) {
+      case AppLifecycleState.resumed:
+      // ✅ التطبيق عاد إلى الواجهة (متصل)
+        if (authService._currentUserId != null) {
+          authService.updateUserStatus(authService._currentUserId!, true);
+        }
+        break;
+
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.inactive:
+      // ✅ التطبيق في الخلفية أو تم إغلاقه (غير متصل)
+        if (authService._currentUserId != null) {
+          authService.updateUserStatus(authService._currentUserId!, false);
+        }
+        break;
+      case AppLifecycleState.hidden:
+        // TODO: Handle this case.
+        throw UnimplementedError();
+    }
+  }
+}
+
 final authStateProvider = StreamProvider<bool>((ref) {
   final service = ref.watch(authServiceProvider);
-  return Stream.periodic(const Duration(seconds: 1), (_) async {
+  return Stream.periodic(const Duration(seconds: 2), (_) async {
     return await service.checkLogin();
   }).asyncMap((event) => event);
 });
 
-// ✅ Provider للحصول على المستخدم الحالي من SharedPreferences
 final cachedUserProvider = FutureProvider<AppUser?>((ref) async {
   final prefs = await SharedPreferences.getInstance();
   final phone = prefs.getString('phone') ?? '';
   final userEmail = prefs.getString('userEmail');
   final userId = prefs.getString('userId');
   final userName = prefs.getString('userName');
+  final isOnline = prefs.getBool('isUserOnline') ?? false;
 
   if (userId != null && userId.isNotEmpty) {
     return AppUser(
@@ -452,8 +461,8 @@ final cachedUserProvider = FutureProvider<AppUser?>((ref) async {
       email: userEmail ?? 'example@gmail.com',
       phone: phone,
       displayName: userName ?? phone,
-      isOnline: false,
-      lastSeen: DateTime.now().millisecondsSinceEpoch,
+      isOnline: isOnline,
+      lastSeen: prefs.getInt('lastSeen') ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 

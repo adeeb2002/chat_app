@@ -6,7 +6,7 @@ class Chat {
   final String lastMessageSender;
   final int createdAt;
   final int updatedAt;
-  final int? unreadCount;
+  final dynamic unreadCount;
   bool isDeletedChatForYou = false;
   final Map<String, dynamic>? deletedFor;
   final Map<String, dynamic>? clearedFor;

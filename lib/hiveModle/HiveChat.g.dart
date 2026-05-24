@@ -8,7 +8,7 @@ part of 'HiveChat.dart';
 
 class HiveChatAdapter extends TypeAdapter<HiveChat> {
   @override
-  final int typeId = 1;
+  final int typeId = 0;
 
   @override
   HiveChat read(BinaryReader reader) {

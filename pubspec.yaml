@@ -46,6 +46,8 @@ dependencies:
   internet_connection_checker_plus: ^3.0.0
   hive: ^2.2.3  # 🌟 بديل حزمة hive الأصلية
   hive_flutter: ^1.1.0 # 🌟 بديل حزمة hive_flutter
+  image_picker: ^1.0.5
+  cached_network_image: ^3.3.1
 
 
 

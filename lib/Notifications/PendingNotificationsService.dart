@@ -18,7 +18,7 @@ class PendingNotificationsService {
   // ✅ مجموعة لتتبع الإشعارات الجاري معالجتها (لمنع التكرار)
   final Set<String> _processingIds = {};
 
-  void startMonitoring() {
+  Future<void> startMonitoring() async{
     print('🔍 بدء مراقبة الإشعارات المعلقة...');
 
     _connectionSubscription = InternetConnection().onStatusChange.listen((status) {

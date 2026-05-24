@@ -11,18 +11,35 @@ class NotificationHandler {
   NotificationHandler._internal();
 
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  bool _isInitialized = false;
 
   /// تهيئة معالج الإشعارات
   void initialize() {
+    if (_isInitialized) {
+      print('⚠️ معالج الإشعارات مهيأ مسبقاً');
+      return;
+    }
+
     print('🔔 تهيئة معالج الإشعارات...');
 
-    // الاستماع للنقر على الإشعار (التطبيق مغلق أو في الخلفية)
-    OneSignal.Notifications.addClickListener(_handleNotificationClick);
+    try {
+      // الاستماع للنقر على الإشعار
+      OneSignal.Notifications.addClickListener(_handleNotificationClick);
 
-    // الاستماع للإشعارات الواردة (التطبيق مفتوح)
-    //OneSignal.Notifications.addForegroundWillDisplayListener(_handleForegroundNotification);
+      // الاستماع للإشعارات الواردة
+      OneSignal.Notifications.addForegroundWillDisplayListener(_handleForegroundNotification);
 
-    print('✅ تم تهيئة معالج الإشعارات');
+      _isInitialized = true;
+      print('✅ تم تهيئة معالج الإشعارات');
+    } catch (e) {
+      print('❌ خطأ في تهيئة معالج الإشعارات: $e');
+    }
+  }
+
+  /// تنظيف الموارد
+  void dispose() {
+    print('🔴 تنظيف معالج الإشعارات...');
+    _isInitialized = false;
   }
 
   /// معالجة النقر على الإشعار
