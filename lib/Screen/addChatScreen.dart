@@ -28,7 +28,7 @@ class _AddChatScreenState extends ConsumerState<AddChatScreen> {
   }
 
   Future<void> _createChat() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (_formKey.currentState == null || !_formKey.currentState!.validate()) return;
     
     final currentUser = ref.read(appUserDataProvider);
     if (currentUser == null) {

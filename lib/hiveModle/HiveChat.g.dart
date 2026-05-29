@@ -28,6 +28,7 @@ class HiveChatAdapter extends TypeAdapter<HiveChat> {
       clearedFor: (fields[8] as Map?)?.cast<String, dynamic>(),
       isBlocked: fields[9] as bool,
       blockedBy: fields[10] as String?,
+      unreadCount: fields[11],
     );
   }
 
@@ -56,7 +57,9 @@ class HiveChatAdapter extends TypeAdapter<HiveChat> {
       ..writeByte(9)
       ..write(obj.isBlocked)
       ..writeByte(10)
-      ..write(obj.blockedBy);
+      ..write(obj.blockedBy)
+      ..writeByte(11)
+      ..write(obj.unreadCount);
   }
 
   @override

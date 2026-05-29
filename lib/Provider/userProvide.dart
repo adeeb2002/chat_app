@@ -2,7 +2,6 @@
 
 import 'dart:async';
 import 'package:ChatApp/Provider/chatProvider.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_database/firebase_database.dart';

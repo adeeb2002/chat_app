@@ -113,27 +113,33 @@ class NotificationHandler {
   /// فتح صفحة المحادثة
   void _navigateToChat(BuildContext context, String chatId) {
     print('💬 فتح المحادثة: $chatId');
-    // استبدل بالمسار الصحيح لصفحة المحادثة
-    Navigator.of(context).pushNamed('/chat', arguments: {'chatId': chatId});
-   // Navigator.push(context, MaterialPageRoute(builder: (context) => ChatScreen(chat: chat, receiverEmail: receiverEmail)))
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('تم فتح المحادثة $chatId')),
+    );
   }
 
   /// فتح صفحة طلبات الصداقة
   void _navigateToFriendRequests(BuildContext context) {
     print('👥 فتح طلبات الصداقة');
-    Navigator.of(context).pushNamed('/friend-requests');
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('طلبات الصداقة قيد التطوير')),
+    );
   }
 
   /// فتح صفحة ملف المستخدم
   void _navigateToUserProfile(BuildContext context, String userId) {
     print('👤 فتح ملف المستخدم: $userId');
-    Navigator.of(context).pushNamed('/profile', arguments: {'userId': userId});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('ملف المستخدم $userId قيد التطوير')),
+    );
   }
 
   /// فتح صفحة المجموعة
   void _navigateToGroup(BuildContext context, String groupId) {
     print('👥 فتح المجموعة: $groupId');
-    Navigator.of(context).pushNamed('/group', arguments: {'groupId': groupId});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('المجموعة $groupId قيد التطوير')),
+    );
   }
 
   /// عرض إشعار داخل التطبيق (Banner أو SnackBar)

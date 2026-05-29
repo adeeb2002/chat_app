@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:ChatApp/Screen/SplashScreen.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:ChatApp/Screen/home.dart';
 import 'package:ChatApp/Screen/login.dart';
 import 'package:ChatApp/hiveModle/HiveMessage.dart';
@@ -20,6 +21,9 @@ import 'hiveModle/HiveChat.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ✅ 0. تحميل المتغيرات البيئية
+  await dotenv.load(fileName: 'data.env');
 
   // ✅ 1. تهيئة Hive
   await Hive.initFlutter();

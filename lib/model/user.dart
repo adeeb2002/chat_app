@@ -64,5 +64,5 @@ class AppUser {
     );
   }
 
-  String get name => displayName.isNotEmpty ? displayName : email!.split('@')[0];
+  String get name => displayName.isNotEmpty ? displayName : (email?.split('@')[0] ?? 'User');
 }

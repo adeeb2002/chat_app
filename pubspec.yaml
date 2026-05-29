@@ -38,12 +38,11 @@ dependencies:
   http: ^1.6.0
   firebase_core: ^4.7.0
   firebase_database: ^12.3.0
-  firebase_auth:
+  firebase_auth: ^5.5.2
   shared_preferences: ^2.5.5
- # image_network: ^2.5.2
   intl: ^0.18.1
-  flutter_dotenv: ^5.1.0
-  internet_connection_checker_plus: ^3.0.0
+  flutter_dotenv: ^5.2.1
+  internet_connection_checker_plus: ^3.0.1
   hive: ^2.2.3  # 🌟 بديل حزمة hive الأصلية
   hive_flutter: ^1.1.0 # 🌟 بديل حزمة hive_flutter
   image_picker: ^1.0.5

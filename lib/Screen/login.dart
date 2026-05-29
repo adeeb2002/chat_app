@@ -206,7 +206,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       final authService = ref.read(authServiceProvider);
       final user = await authService.register(phone, password, context);
 
-      if (user != null && mounted) {
+      if (user != null && mounted && user.id != null) {
         await FirebaseDatabase.instance
             .ref('users')
             .child(user.id!)
@@ -277,7 +277,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } catch (e) {
       _showErrorSnackBar('حدث خطأ أثناء التحقق: ${e.toString()}');
     } finally {
-      setState(() => _isVerifyingPhone = false);
+      if (mounted) setState(() => _isVerifyingPhone = false);
     }
   }
 
@@ -337,7 +337,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } catch (e) {
       _showErrorSnackBar('حدث خطأ أثناء تغيير كلمة المرور: ${e.toString()}');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 

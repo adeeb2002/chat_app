@@ -1541,6 +1541,10 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                                     setModalState(() => isSaving = true);
 
                                     try {
+                                      if (currentUser.id == null) {
+                                        setModalState(() => isSaving = false);
+                                        return;
+                                      }
                                       final database = ref.read(
                                         firebaseDatabaseProvider,
                                       );

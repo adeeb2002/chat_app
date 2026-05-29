@@ -7,7 +7,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -2707,7 +2706,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
                                 try {
                                   final database = ref.read(firebaseDatabaseProvider);
-                                  if (currentUser.id == null) return;
+                                  if (currentUser.id == null) {
+                                    setModalState(() => isSaving = false);
+                                    return;
+                                  }
                                   await database.ref('users').child(currentUser.id!).update({
                                     'email': newEmail,
                                     'displayName': newName,
