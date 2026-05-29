@@ -230,6 +230,7 @@ class AuthService {
   }
 
   Future<void> logout() async {
+    _onlineStatusTimer?.cancel();
     if (_currentUserId != null) {
       await updateUserStatus(_currentUserId!, false);
     }
@@ -434,8 +435,10 @@ class AppLifecycleObserver with WidgetsBindingObserver {
         }
         break;
       case AppLifecycleState.hidden:
-        // TODO: Handle this case.
-        throw UnimplementedError();
+        if (authService._currentUserId != null) {
+          authService.updateUserStatus(authService._currentUserId!, false);
+        }
+        break;
     }
   }
 }

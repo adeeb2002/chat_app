@@ -78,75 +78,86 @@ final chatsProvider = StreamProvider.family<List<Chat>, String>((ref, userPhone)
   // ✅ الاستماع للتغييرات من Firebase
   print('🔥 [chatsProvider] الاستماع إلى Firebase...');
   final listener = db.ref('chats').onValue.listen((event) {
-    final data = event.snapshot.value as Map<dynamic, dynamic>? ?? {};
-    final List<Chat> chats = [];
+    try {
+      final data = event.snapshot.value as Map<dynamic, dynamic>? ?? {};
+      final List<Chat> chats = [];
 
-    print('🔥 عدد المحادثات في Firebase: ${data.length}');
+      print('🔥 عدد المحادثات في Firebase: ${data.length}');
 
-    data.forEach((chatId, chatData) {
-      final chatMap = Map<String, dynamic>.from(chatData);
-      final participants = List<String>.from(chatMap['participants'] ?? []);
-      final deletedFor = Map<String, dynamic>.from(chatMap['deletedFor'] ?? {});
-      final clearedFor = Map<String, dynamic>.from(chatMap['clearedFor'] ?? {});
+      data.forEach((chatId, chatData) {
+        if (chatData is! Map) return;
+        try {
+          final chatMap = Map<String, dynamic>.from(chatData);
+          final participants = List<String>.from(chatMap['participants'] ?? []);
+          final deletedFor = Map<String, dynamic>.from(chatMap['deletedFor'] ?? {});
+          final clearedFor = Map<String, dynamic>.from(chatMap['clearedFor'] ?? {});
 
-      print('🔍 محادثة $chatId:');
-      print('   - المشاركون: $participants');
-      print('   - المحذوفة للمستخدم: ${deletedFor.containsKey(userPhone)}');
+          print('🔍 محادثة $chatId:');
+          print('   - المشاركون: $participants');
+          print('   - المحذوفة للمستخدم: ${deletedFor.containsKey(userPhone)}');
 
-      if (participants.contains(userPhone) && !deletedFor.containsKey(userPhone)) {
+          if (participants.contains(userPhone) && !deletedFor.containsKey(userPhone)) {
 
-        // ✅ المعالجة الصحيحة والآمنة لـ unreadCount
-        dynamic unreadCountValue = chatMap['unreadCount'];
-        dynamic finalUnreadCount;
+            // ✅ المعالجة الصحيحة والآمنة لـ unreadCount
+            dynamic unreadCountValue = chatMap['unreadCount'];
+            dynamic finalUnreadCount;
 
-        if (unreadCountValue == null) {
-          // ✅ إذا كانت null، نستخدم Map فارغ
-          finalUnreadCount = <String, dynamic>{};
-          print('   - unreadCount هو null، استخدام Map فارغ');
-        } else if (unreadCountValue is Map) {
-          // ✅ إذا كان Map، نحتفظ به
-          finalUnreadCount = Map<String, dynamic>.from(unreadCountValue);
-          print('   - unreadCount هو Map: $finalUnreadCount');
-        } else if (unreadCountValue is int) {
-          // ✅ إذا كان int، نحوله إلى Map (للتوافق)
-          finalUnreadCount = unreadCountValue;
-          print('   - unreadCount هو int: $finalUnreadCount');
-        } else {
-          // ✅ أي نوع آخر، نستخدم 0
-          finalUnreadCount = 0;
-          print('   - unreadCount نوع غير معروف، استخدام 0');
+            if (unreadCountValue == null) {
+              // ✅ إذا كانت null، نستخدم Map فارغ
+              finalUnreadCount = <String, dynamic>{};
+              print('   - unreadCount هو null، استخدام Map فارغ');
+            } else if (unreadCountValue is Map) {
+              // ✅ إذا كان Map، نحتفظ به
+              finalUnreadCount = Map<String, dynamic>.from(unreadCountValue);
+              print('   - unreadCount هو Map: $finalUnreadCount');
+            } else if (unreadCountValue is int) {
+              // ✅ إذا كان int، نحوله إلى Map (للتوافق)
+              finalUnreadCount = unreadCountValue;
+              print('   - unreadCount هو int: $finalUnreadCount');
+            } else {
+              // ✅ أي نوع آخر، نستخدم 0
+              finalUnreadCount = 0;
+              print('   - unreadCount نوع غير معروف، استخدام 0');
+            }
+
+            final chat = Chat(
+              id: chatId.toString(),
+              participants: participants,
+              lastMessage: chatMap['lastMessage'] ?? '',
+              lastMessageTime: chatMap['lastMessageTime'] ?? 0,
+              lastMessageSender: chatMap['lastMessageSender'] ?? '',
+              createdAt: chatMap['createdAt'] ?? 0,
+              updatedAt: chatMap['updatedAt'] ?? 0,
+              deletedFor: deletedFor,
+              clearedFor: clearedFor,
+              isBlocked: chatMap['isBlocked'] ?? false,
+              blockedBy: chatMap['blockedBy'],
+              isDeletedChatForYou: deletedFor.containsKey(userPhone),
+              unreadCount: finalUnreadCount,
+            );
+
+            chats.add(chat);
+            print('   ✅ تم إضافة المحادثة');
+
+            // ✅ حفظ المحادثة في الكاش
+            cacheService.cacheSingleChat(chat);
+          } else {
+            print('   ❌ لم يتم إضافة المحادثة (المستخدم ليس مشاركاً أو محذوفة)');
+          }
+        } catch (e) {
+          print('❌ خطأ في معالجة محادثة $chatId: $e');
         }
+      });
 
-        final chat = Chat(
-          id: chatId.toString(),
-          participants: participants,
-          lastMessage: chatMap['lastMessage'] ?? '',
-          lastMessageTime: chatMap['lastMessageTime'] ?? 0,
-          lastMessageSender: chatMap['lastMessageSender'] ?? '',
-          createdAt: chatMap['createdAt'] ?? 0,
-          updatedAt: chatMap['updatedAt'] ?? 0,
-          deletedFor: deletedFor,
-          clearedFor: clearedFor,
-          isBlocked: chatMap['isBlocked'] ?? false,
-          blockedBy: chatMap['blockedBy'],
-          isDeletedChatForYou: deletedFor.containsKey(userPhone),
-          unreadCount: finalUnreadCount,
-        );
-
-        chats.add(chat);
-        print('   ✅ تم إضافة المحادثة');
-
-        // ✅ حفظ المحادثة في الكاش
-        cacheService.cacheSingleChat(chat);
-      } else {
-        print('   ❌ لم يتم إضافة المحادثة (المستخدم ليس مشاركاً أو محذوفة)');
-      }
-    });
-
-    chats.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    print('📊 عدد المحادثات بعد التصفية: ${chats.length}');
-    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    controller.add(chats);
+      chats.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      print('📊 عدد المحادثات بعد التصفية: ${chats.length}');
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      controller.add(chats);
+    } catch (e) {
+      print('❌ خطأ في معالجة بيانات المحادثات: $e');
+    }
+  }, onError: (error) {
+    print('❌ خطأ في استماع Firebase: $error');
   });
 
   ref.onDispose(() {

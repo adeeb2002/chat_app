@@ -421,7 +421,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               error: (error, stackTrace) => _buildErrorState(error.toString()),
             ),
           ),
-          _buildMessageInput(isUserBlocked, widget.chat.id, currentUser!.id!),
+          _buildMessageInput(isUserBlocked, widget.chat.id, currentUser?.id ?? ''),
         ],
       ),
     );
@@ -915,9 +915,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             }
           } else {
             // ✅ مسح الرسائل للمستخدم فقط
+            if (currentUser == null) return;
             await ref.read(chatServiceProvider).clearChatForUser(
               widget.chat.id,
-              currentUser!.phone,
+              currentUser.phone,
             );
 
             if (mounted) {
@@ -2208,7 +2209,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 ),
                 InkWell(
                   onTap: () {
-                    ref.read(chatServiceProvider).unblockUser(chatId, myId);
+                    ref.read(chatServiceProvider).unblockUser(chatId, myId).catchError((e) {
+                      print('❌ خطأ في إلغاء الحظر: $e');
+                    });
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -2704,6 +2707,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
                                 try {
                                   final database = ref.read(firebaseDatabaseProvider);
+                                  if (currentUser.id == null) return;
                                   await database.ref('users').child(currentUser.id!).update({
                                     'email': newEmail,
                                     'displayName': newName,

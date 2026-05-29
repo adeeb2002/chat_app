@@ -37,20 +37,27 @@ final messagesProvider = StreamProvider.family<List<Message>, String>((ref, chat
 
   // ✅ الاستماع للرسائل الجديدة من Firebase
   final listener = db.ref('chats').child(chatId).child('messages').onValue.listen((event) {
-    final data = event.snapshot.value as Map<dynamic, dynamic>? ?? {};
+    try {
+      final data = event.snapshot.value as Map<dynamic, dynamic>? ?? {};
 
-    final messages = data.entries.map((entry) {
-      return Message.fromMap(entry.value as Map<dynamic, dynamic>);
-    }).toList();
+      final messages = data.entries.map((entry) {
+        if (entry.value is! Map) return null;
+        return Message.fromMap(entry.value as Map<dynamic, dynamic>);
+      }).whereType<Message>().toList();
 
-    messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-    // ✅ حفظ في الكاش
-    cacheService.saveMessages(chatId, messages);
+      // ✅ حفظ في الكاش
+      cacheService.saveMessages(chatId, messages);
 
-    if (!controller.isClosed) {
-      controller.add(messages);
+      if (!controller.isClosed) {
+        controller.add(messages);
+      }
+    } catch (e) {
+      print('❌ خطأ في معالجة الرسائل: $e');
     }
+  }, onError: (error) {
+    print('❌ خطأ في استماع Firebase: $error');
   });
 
   ref.onDispose(() {

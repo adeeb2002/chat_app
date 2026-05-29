@@ -169,16 +169,12 @@ class AdvancedCacheService {
     }
   }
 
-  // ✅ جلب المحادثات فقط
+  // ✅ جلب المحادثات فقط (متزامن - للاستخدام في الـ UI)
   List<Chat> getCachedChats() {
     try {
       if (_chatsBox == null || !_chatsBox!.isOpen) {
-        print('⚠️ صندوق المحادثات غير مفتوح، إعادة محاولة الفتح...');
-        // محاولة فتح الصندوق
-        _initBoxes();
-        if (_chatsBox == null || !_chatsBox!.isOpen) {
-          return [];
-        }
+        print('⚠️ صندوق المحادثات غير مفتوح');
+        return [];
       }
 
       final box = _chatsBox!;

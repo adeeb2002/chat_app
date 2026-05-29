@@ -53,7 +53,7 @@ class ImageUploadService {
           'name': 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg',
           'expiration': '0', // 0 = لا تنتهي أبداً
         },
-      );
+      ).timeout(const Duration(seconds: 30));
 
       print('📡 Response Status: ${response.statusCode}');
 

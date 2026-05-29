@@ -21,15 +21,25 @@ class CustomSearchBar extends StatefulWidget {
 class _CustomSearchBarState extends State<CustomSearchBar> {
   bool _showClearButton = false;
 
+  late VoidCallback _listener;
+
   @override
   void initState() {
     super.initState();
-    // مراقبة النص لإظهار أو إخفاء زر المسح (X)
-    widget.controller.addListener(() {
-      setState(() {
-        _showClearButton = widget.controller.text.isNotEmpty;
-      });
-    });
+    _listener = () {
+      if (mounted) {
+        setState(() {
+          _showClearButton = widget.controller.text.isNotEmpty;
+        });
+      }
+    };
+    widget.controller.addListener(_listener);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_listener);
+    super.dispose();
   }
 
   @override

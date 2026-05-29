@@ -67,8 +67,6 @@ void main() async {
   print('✅ تم تهيئة التطبيق بنجاح');
 
   runApp(const ProviderScope(child: MyApp()));
-
-  runApp(const ProviderScope(child: MyApp()));
 }
 
 class MyApp extends StatelessWidget {
