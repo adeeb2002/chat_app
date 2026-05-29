@@ -9,6 +9,7 @@ import 'package:internet_connection_checker_plus/internet_connection_checker_plu
 import 'package:shared_preferences/shared_preferences.dart';
 import '../Notifications/notifications.dart';
 import '../model/user.dart';
+import '../service/hash_service.dart';
 
 // Providers
 final appUserDataProvider = StateProvider<AppUser?>((ref) => null);
@@ -151,7 +152,8 @@ class AuthService {
           final userId = entry.key.toString();
           final userData = Map<String, dynamic>.from(entry.value);
 
-          if (userData['password'] == password) {
+          final hashedInputPassword = HashService.hashPassword(password);
+          if (userData['password'] == hashedInputPassword || userData['password'] == password) {
             final user = AppUser(
               id: userId,
               phone: phone,
@@ -201,7 +203,7 @@ class AuthService {
         displayName: phone,
         isOnline: true,
         lastSeen: DateTime.now().millisecondsSinceEpoch,
-        password: password,
+        password: HashService.hashPassword(password),
       );
 
       await newUserRef.set(newUser.toMap());
@@ -350,12 +352,13 @@ class AuthService {
 
       final userData = Map<String, dynamic>.from(snapshot.value as Map);
 
-      if (userData['password'] != oldPassword) {
+      final hashedOldInput = HashService.hashPassword(oldPassword);
+      if (userData['password'] != hashedOldInput && userData['password'] != oldPassword) {
         throw Exception('كلمة المرور القديمة غير صحيحة');
       }
 
       await db.ref('users').child(userId).update({
-        'password': newPassword,
+        'password': HashService.hashPassword(newPassword),
         'updatedAt': DateTime.now().millisecondsSinceEpoch,
       });
 

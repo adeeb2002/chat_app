@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../model/NotificationType.dart';
 
 class NotificationService {
@@ -14,8 +15,8 @@ class NotificationService {
   factory NotificationService() => _instance;
   NotificationService._internal();
 
-  static const String _restApiKey = "os_v2_app_ehltm5wfuzyb9sbp2s4z6tney5aazwiqocvouwL4nmsrjp7fcmsjbxi25pqw653ncseyemd5e77l";
-  static const String _appId = "21d73676-c5a6-426e-85fa-9665c9b9688";
+  static final String _restApiKey = dotenv.env['ONESIGNAL_REST_API_KEY'] ?? '';
+  static final String _appId = dotenv.env['ONESIGNAL_APP_ID'] ?? '';
 
   bool _isInitialized = false;
   static String? currentOpenChatId;

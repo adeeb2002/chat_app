@@ -6,14 +6,15 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class ImageUploadService {
   static final ImageUploadService _instance = ImageUploadService._internal();
   factory ImageUploadService() => _instance;
   ImageUploadService._internal();
 
-  // ✅ مفتاح API من ImgBB (ضع مفتاحك الحقيقي هنا)
-  static const String _apiKey = 'af33820276aaa4314c6169f1bb387d7b'; // 🔑 استبدل بمفتاحك
+  // ✅ مفتاح API من ImgBB (مسترجع من ملف البيئة لتأمينه)
+  static final String _apiKey = dotenv.env['IMGBB_API_KEY'] ?? '';
 
   final ImagePicker _picker = ImagePicker();
 

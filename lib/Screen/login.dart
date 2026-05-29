@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../service/hash_service.dart';
 
 import '../Combonant/login/LoginWidget.dart';
 import '../Combonant/login/RegisterWidget.dart';
@@ -318,7 +319,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               .ref('users')
               .child(userId)
               .update({
-            'password': newPassword,
+            'password': HashService.hashPassword(newPassword),
             'updatedAt': DateTime.now().millisecondsSinceEpoch,
           });
 
