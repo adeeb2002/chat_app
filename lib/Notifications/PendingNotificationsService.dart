@@ -42,18 +42,6 @@ class PendingNotificationsService {
       print('From: $senderPhone');
       print('To: $receiverPhone');
 
-      // ✅ التحقق إذا كان هناك إشعار معلق مسبقاً لنفس الرسالة
-      final existingSnapshot = await _db
-          .ref('pendingNotifications')
-          .orderByChild('messageId')
-          .equalTo(messageId)
-          .get();
-
-      if (existingSnapshot.exists) {
-        print('⚠️ إشعار معلق موجود مسبقاً لهذه الرسالة، يتم تخطي الإضافة');
-        return;
-      }
-
       final notificationRef = _db.ref('pendingNotifications').push();
 
       await notificationRef.set({
