@@ -27,8 +27,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   @override
   void initState() {
     super.initState();
-    _checkLoginStatus();
-
     _controller = AnimationController(
       duration: const Duration(seconds: 2),
       vsync: this,
@@ -41,38 +39,13 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
     _controller.forward();
 
-    _navigateAfterDelay();
+    _initApp();
   }
 
-  Future<void> _navigateAfterDelay() async {
+  Future<void> _initApp() async {
     await Future.delayed(const Duration(seconds: 3));
 
-    if (_hasNavigated || !mounted) return;
-    _hasNavigated = true;
-
-    final prefs = await SharedPreferences.getInstance();
-    final isLoggedIn = prefs.getBool('isLogin') ?? false;
-    final userPhone = prefs.getString('phone');
-
-    if (mounted) {
-      if (isLoggedIn && userPhone != null && userPhone.isNotEmpty) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          RouteAnimation.slideFromRight(HomeScreen()),(route) => false,
-        );
-      } else {
-        Navigator.pushAndRemoveUntil(
-          context,
-          RouteAnimation.slideRightAndFade(LoginScreen()),(route) => false,
-        );
-      }
-    }
-  }
-  Future<void> _checkLoginStatus() async {
-    await Future.delayed(const Duration(milliseconds: 2500));
-
-    if (_hasNavigated || !mounted) return;
-    _hasNavigated = true;
+    if (!mounted) return;
 
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -87,7 +60,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
         // ✅ تعيين المستخدم كـ "غير متصل" مؤقتاً
         await authService.updateUserStatus(userId, false);
 
-        // ✅ بعد ثانية، إذا كان هناك اتصال، قم بتعيينه كـ "متصل"
+        // ✅ بعد ثانيتين، إذا كان هناك اتصال، قم بتعيينه كـ "متصل"
         Future.delayed(const Duration(seconds: 2), () {
           if (authService.isConnected) {
             authService.updateUserStatus(userId, true);
@@ -97,23 +70,26 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
       if (mounted) {
         if (isLoggedIn && userPhone != null && userPhone.isNotEmpty) {
-          Navigator.pushReplacement(
+          Navigator.pushAndRemoveUntil(
             context,
-            MaterialPageRoute(builder: (_) => const HomeScreen()),
+            RouteAnimation.slideFromRight(HomeScreen()),
+            (route) => false,
           );
         } else {
-          Navigator.pushReplacement(
+          Navigator.pushAndRemoveUntil(
             context,
-            MaterialPageRoute(builder: (_) => const LoginScreen()),
+            RouteAnimation.slideRightAndFade(LoginScreen()),
+            (route) => false,
           );
         }
       }
     } catch (e) {
       print('❌ [Splash] خطأ: $e');
-      if (mounted && !_hasNavigated) {
-        Navigator.pushReplacement(
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          RouteAnimation.slideRightAndFade(LoginScreen()),
+          (route) => false,
         );
       }
     }

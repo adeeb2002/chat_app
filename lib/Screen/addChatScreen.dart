@@ -43,7 +43,14 @@ class _AddChatScreenState extends ConsumerState<AddChatScreen> {
       final receiverPhone = receiverController.text.trim();
 
       if(receiverPhone.contains(currentUser.phone) || receiverPhone==currentUser.phone){
-        _showSnackBar('لا يمكن ان تنشء محادثة مع نفسك');
+        _showSnackBar('لا يمكنك إنشاء محادثة مع نفسك');
+        return;
+      }
+
+      // التحقق مما إذا كان رقم هاتف المستقبل مسجلاً بالتطبيق
+      final targetUser = await ref.read(authServiceProvider).getUserByPhone(receiverPhone);
+      if (targetUser == null) {
+        _showSnackBar('رقم الهاتف غير مسجل في التطبيق');
         return;
       }
       
@@ -192,7 +199,7 @@ class _AddChatScreenState extends ConsumerState<AddChatScreen> {
                   if (value.length<10) {
                     return 'رقم الهاتف غير صالح';
                   }
-                  if (value == currentUser?.email) {
+                  if (value == currentUser?.phone) {
                     return 'لا يمكنك إنشاء محادثة مع نفسك';
                   }
                   return null;
