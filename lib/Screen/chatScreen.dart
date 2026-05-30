@@ -2469,8 +2469,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
 
     void _showProfileBottomSheet() {
-      final currentUser = ref.read(appUserDataProvider);
-      if (currentUser == null) return;
+      final receiverData = ref.read(userDataProvider(widget.receiverPhone));
+      if (receiverData.valueOrNull == null) return;
+      final user = receiverData.valueOrNull!;
 
       showModalBottomSheet(
         context: context,
@@ -2500,7 +2501,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   children: [
-                    // ✅ صورة المستخدم (قابلة للضغط لعرض التفاصيل فقط، بدون تعديل)
                     Container(
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
@@ -2514,13 +2514,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                       child: CircleAvatar(
                         radius: 60,
                         backgroundColor: const Color(0xFF075E54).withOpacity(0.1),
-                        backgroundImage: currentUser.imageUrl != null && currentUser.imageUrl!.isNotEmpty
-                            ? NetworkImage(currentUser.imageUrl!)
+                        backgroundImage: user.imageUrl != null && user.imageUrl!.isNotEmpty
+                            ? NetworkImage(user.imageUrl!)
                             : null,
-                        child: currentUser.imageUrl == null || currentUser.imageUrl!.isEmpty
+                        child: user.imageUrl == null || user.imageUrl!.isEmpty
                             ? Text(
-                          currentUser.displayName.isNotEmpty
-                              ? currentUser.displayName[0].toUpperCase()
+                          user.displayName.isNotEmpty
+                              ? user.displayName[0].toUpperCase()
                               : 'U',
                           style: const TextStyle(
                             fontSize: 48,
@@ -2533,7 +2533,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     ),
                     const SizedBox(height: 20),
                     Text(
-                      currentUser.displayName,
+                      user.displayName,
                       style: const TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
@@ -2550,7 +2550,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        currentUser.phone ?? 'رقم الهاتف غير متوفر',
+                        widget.receiverPhone,
                         style: TextStyle(fontSize: 14, color: Colors.grey[700]),
                       ),
                     ),
@@ -2575,54 +2575,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                           : Colors.grey.withOpacity(0.1),
                     ),
                     const SizedBox(height: 32),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              Navigator.pop(context);
-                              // ✅ ننتقل إلى شاشة تعديل الملف الشخصي (يجب أن تكون في LoginScreen)
-                              // هذا غير موجود في ChatScreen
-                            },
-                            icon: const Icon(Icons.edit, size: 20),
-                            label: const Text(
-                              'تعديل',
-                              style: TextStyle(
-                                color: Colors.green,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.green,
-                              side: const BorderSide(color: Colors.green),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF075E54),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => Navigator.pop(context),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF075E54),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: const Text(
-                              'إغلاق',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                        child: const Text(
+                          'إغلاق',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   ],
                 ),

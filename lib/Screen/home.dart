@@ -5,6 +5,7 @@ import 'package:ChatApp/Provider/chatProvider.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:ChatApp/Screen/addChatScreen.dart';
 import 'package:ChatApp/Screen/login.dart';
+import 'package:ChatApp/Screen/settingsScreen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -381,6 +382,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 _logout();
               } else if (value == 'profile') {
                 _showProfileBottomSheet();
+              } else if (value == 'settings') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
               } else if (value == 'share') {
                 _showShareOptions();
               }
@@ -410,6 +416,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     SizedBox(width: 12),
                     Text(
                       'مشاركة التطبيق',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'settings',
+                child: Row(
+                  children: [
+                    Icon(Icons.settings, size: 20, color: Colors.grey),
+                    SizedBox(width: 12),
+                    Text(
+                      'الإعدادات',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
