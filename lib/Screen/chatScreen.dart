@@ -39,11 +39,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   // ✅ قائمة واحدة فقط للرسائل التي يتم عرضها
   final List<Message> _messages = [];
 
-  // ✅ مجموعة لتتبع الرسائل التي فشل إرسالها
   final Set<String> _failedMessages = {};
 
-  // ✅ مجموعة لتتبع الرسائل الجاري إرسالها
   final Set<String> _sendingMessages = {};
+
+  Timer? _typingTimer;
+  bool _isTyping = false;
 
   bool _isFirstLoad = true;
   bool isConnected = false;
@@ -63,6 +64,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     });
 
     NotificationService.currentOpenChatId = widget.chat.id;
+
+    _messageController.addListener(_onTextChanged);
 
     connectionSubscription = InternetConnection().onStatusChange.listen((status) {
       final hasConnection = status == InternetStatus.connected;
@@ -85,6 +88,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   @override
   void dispose() {
+    _messageController.removeListener(_onTextChanged);
+    _typingTimer?.cancel();
+    _setTyping(false);
     _messageController.dispose();
     _scrollController.dispose();
     connectionSubscription?.cancel();
@@ -107,6 +113,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       _sendingMessages.add(message.id);
     });
     _scrollToBottom();
+  }
+
+  void _onTextChanged() {
+    final text = _messageController.text.trim();
+    if (text.isNotEmpty && !_isTyping) {
+      _setTyping(true);
+    }
+    _typingTimer?.cancel();
+    _typingTimer = Timer(const Duration(seconds: 2), () {
+      _setTyping(false);
+    });
+  }
+
+  void _setTyping(bool typing) {
+    if (_isTyping == typing) return;
+    _isTyping = typing;
+    final currentUser = ref.read(appUserDataProvider);
+    if (currentUser != null && currentUser.phone.isNotEmpty) {
+      ref.read(chatServiceProvider).setTypingStatus(
+        widget.chat.id,
+        currentUser.phone,
+        typing,
+      );
+    }
   }
 
   // ✅ تحديث حالة الرسالة بعد نجاح الإرسال
@@ -193,6 +223,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   Future<void> _sendMessage() async {
+    _typingTimer?.cancel();
+    _setTyping(false);
     final text = _messageController.text.trim();
     final currentUser = ref.read(appUserDataProvider);
 
@@ -302,6 +334,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
 
     final blockStatus = ref.watch(chatBlockStatusProvider(widget.chat.id));
+    final isTyping = ref.watch(chatTypingStatusProvider({
+      'chatId': widget.chat.id,
+      'receiverPhone': widget.receiverPhone,
+    }));
 
     blockStatus.whenData((status) {
       if (mounted) {
@@ -326,7 +362,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
     return Scaffold(
       backgroundColor: const Color(0xFFECE5DD),
-      appBar: _buildAppBar(receiverName, receiverData, isUserBlocked),
+      appBar: _buildAppBar(receiverName, receiverData, isUserBlocked, isTyping),
       body: Column(
         children: [
           if (!isConnected)
@@ -430,6 +466,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       String receiverName,
       AsyncValue<AppUser?> receiverData,
       bool isUserBlocked,
+      bool isTyping,
       ) {
     return AppBar(
       backgroundColor: const Color(0xFF075E54),
@@ -526,6 +563,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         color: Colors.red,
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
+                      ),
+                    )
+                  else if (isTyping)
+                    const Text(
+                      'يكتب الآن...',
+                      style: TextStyle(
+                        color: Colors.greenAccent,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
                       ),
                     )
                   else
@@ -1756,10 +1802,35 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(
-                        message.body,
-                        style: const TextStyle(color: Color(0xFF303030), fontSize: 15),
-                      ),
+                    child: message.type == MessageType.image
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: CachedNetworkImage(
+                              imageUrl: message.body,
+                              width: 200,
+                              fit: BoxFit.cover,
+                              placeholder: (_, __) => Container(
+                                width: 200,
+                                height: 150,
+                                color: Colors.grey[200],
+                                child: const Center(
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              ),
+                              errorWidget: (_, __, ___) => Container(
+                                width: 200,
+                                height: 150,
+                                color: Colors.grey[200],
+                                child: const Center(
+                                  child: Icon(Icons.broken_image, color: Colors.grey),
+                                ),
+                              ),
+                            ),
+                          )
+                        : Text(
+                            message.body,
+                            style: const TextStyle(color: Color(0xFF303030), fontSize: 15),
+                          ),
                       if (message.editedAt != null) ...[
                         const SizedBox(height: 2),
                         Text(
@@ -2180,6 +2251,106 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       }
     }
   
+    void _showMediaPickerDialog() {
+      showModalBottomSheet(
+        context: context,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (context) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'إرسال صورة',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.photo_library, color: Colors.green),
+                  title: const Text('اختيار من المعرض'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickAndSendImage(fromCamera: false);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.camera_alt, color: Colors.green),
+                  title: const Text('التقاط صورة'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickAndSendImage(fromCamera: true);
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    Future<void> _pickAndSendImage({required bool fromCamera}) async {
+      final currentUser = ref.read(appUserDataProvider);
+      if (currentUser == null || currentUser.phone.isEmpty) return;
+
+      final imageService = ImageUploadService();
+      final imageFile = await imageService.pickImage(fromCamera: fromCamera);
+      if (imageFile == null) return;
+
+      final tempMessageId = DateTime.now().millisecondsSinceEpoch.toString();
+
+      // أضف رسالة مبدئية بحالة انتظار
+      final pendingMessage = Message(
+        id: tempMessageId,
+        senderUser: currentUser.phone,
+        resevUser: widget.receiverPhone,
+        body: 'جاري رفع الصورة...',
+        chatId: widget.chat.id,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        isRead: false,
+        type: MessageType.image,
+        isDeleted: false,
+        isSynced: false,
+      );
+      _addMessage(pendingMessage);
+
+      try {
+        final imageUrl = await imageService.uploadImage(imageFile);
+        if (imageUrl == null) {
+          _markMessageAsFailed(tempMessageId);
+          _showErrorSnackBar('فشل رفع الصورة');
+          return;
+        }
+
+        // أرسل الرسالة بالرابط
+        final message = Message(
+          id: tempMessageId,
+          senderUser: currentUser.phone,
+          resevUser: widget.receiverPhone,
+          body: imageUrl,
+          chatId: widget.chat.id,
+          timestamp: DateTime.now().millisecondsSinceEpoch,
+          isRead: false,
+          type: MessageType.image,
+          isDeleted: false,
+          isSynced: false,
+        );
+
+        ref.read(messageServiceProvider).sendMessage(message, tempMessageId).then((_) {
+          _markMessageAsSent(tempMessageId);
+          ref.invalidate(messagesProvider(widget.chat.id));
+        }).catchError((e) {
+          print('❌ فشل إرسال الصورة: $e');
+          _markMessageAsFailed(tempMessageId);
+        });
+      } catch (e) {
+        _markMessageAsFailed(tempMessageId);
+        _showErrorSnackBar('حدث خطأ: $e');
+      }
+    }
+
     Widget _buildMessageInput(bool isUserBlocked, String chatId, String myId) {
       if (isUserBlocked) {
         return Container(
@@ -2255,7 +2426,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             children: [
               IconButton(
                 icon: const Icon(Icons.attach_file, color: Colors.grey),
-                onPressed: () => _showComingSoonMessage(),
+                onPressed: _showMediaPickerDialog,
               ),
               Expanded(
                 child: Container(

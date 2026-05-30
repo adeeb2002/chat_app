@@ -437,6 +437,15 @@ class ChatService {
     }
   }
 
+  Future<void> setTypingStatus(String chatId, String phone, bool isTyping) async {
+    try {
+      final cleanPhone = phone.replaceAll('+', 'p');
+      await db.ref('chats').child(chatId).child('typing').child(cleanPhone).set(isTyping);
+    } catch (e) {
+      print('❌ خطأ في تحديث حالة الكتابة: $e');
+    }
+  }
+
   String extractPhoneFromChatId(String chatId, String currentUserPhone) {
     final parts = chatId.split('_');
     for (var part in parts) {
@@ -456,3 +465,24 @@ class ChatService {
     return '';
   }
 }
+
+final chatTypingStatusProvider = StreamProvider.family<bool, Map<String, String>>((ref, params) {
+  final db = ref.watch(firebaseDatabaseProvider);
+  final chatId = params['chatId']!;
+  final receiverPhone = params['receiverPhone']!;
+
+  final controller = StreamController<bool>.broadcast();
+
+  final cleanReceiverPhone = receiverPhone.replaceAll('+', 'p');
+  final listener = db.ref('chats').child(chatId).child('typing').child(cleanReceiverPhone).onValue.listen((event) {
+    final val = event.snapshot.value as bool? ?? false;
+    controller.add(val);
+  });
+
+  ref.onDispose(() {
+    listener.cancel();
+    controller.close();
+  });
+
+  return controller.stream;
+});
