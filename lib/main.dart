@@ -18,6 +18,7 @@ import 'Notifications/NotificationHandler.dart';
 import 'Notifications/PendingNotificationsService.dart';
 import 'Notifications/notifications.dart';
 import 'hiveModle/HiveChat.dart';
+import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -80,13 +81,10 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: NotificationHandler().navigatorKey,
-      title: 'Chat App',
+      title: 'ChatApp',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.green,
-        useMaterial3: true,
-      ),
-      home:  SplashScreen(),
+      theme: AppTheme.lightTheme,
+      home: const SplashScreen(),
     );
   }
 }

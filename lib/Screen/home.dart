@@ -1060,60 +1060,138 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
 
   Widget _buildEmptyState(AppUser currentUser) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 120,
-            height: 120,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.green[50],
-            ),
-            child: const Icon(
-              Icons.chat_bubble_outline,
-              size: 60,
-              color: Colors.green,
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'مرحباً ${currentUser.displayName ?? currentUser.phone}',
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF075E54),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'لا توجد محادثات بعد',
-            style: TextStyle(color: Colors.grey, fontSize: 16),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'ابدأ محادثة جديدة الآن',
-            style: TextStyle(color: Colors.grey, fontSize: 14),
-          ),
-          const SizedBox(height: 32),
-          ElevatedButton.icon(
-            onPressed: () => Navigator.push(
-              context,
-              RouteAnimation.slideFromRight(AddChatScreen()),
-            ),
-            icon: const Icon(Icons.add),
-            label: const Text('محادثة جديدة'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF075E54),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(25),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // ─── أيقونة متحركة ───
+            Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    const Color(0xFF075E54).withOpacity(0.1),
+                    const Color(0xFF25D366).withOpacity(0.1),
+                  ],
+                ),
+              ),
+              child: Container(
+                margin: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF075E54).withOpacity(0.1),
+                ),
+                child: const Icon(
+                  Icons.chat_rounded,
+                  size: 64,
+                  color: Color(0xFF075E54),
+                ),
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 32),
+
+            // ─── الترحيب ───
+            Text(
+              'مرحباً ${currentUser.displayName}',
+              style: const TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF075E54),
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+
+            // ─── الوصف ───
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  _buildFeatureRow(
+                    icon: Icons.chat_bubble_outline,
+                    text: 'ابدأ محادثة مع أي شخص',
+                  ),
+                  const SizedBox(height: 8),
+                  _buildFeatureRow(
+                    icon: Icons.photo_outlined,
+                    text: 'شارك الصور والوسائط',
+                  ),
+                  const SizedBox(height: 8),
+                  _buildFeatureRow(
+                    icon: Icons.lock_outline,
+                    text: 'محادثات آمنة ومشفرة',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 32),
+
+            // ─── زر البدء ───
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AddChatScreen()),
+                ),
+                icon: const Icon(Icons.add_rounded, size: 22),
+                label: const Text(
+                  'ابدأ محادثة جديدة',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF075E54),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 2,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _buildFeatureRow({required IconData icon, required String text}) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF075E54).withOpacity(0.08),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 18, color: const Color(0xFF075E54)),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          text,
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFF667781),
+          ),
+        ),
+      ],
     );
   }
 
