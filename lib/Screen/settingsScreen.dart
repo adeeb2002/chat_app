@@ -1,4 +1,6 @@
+import 'package:ChatApp/Notifications/notifications.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
+import 'package:ChatApp/Screen/editProfileScreen.dart';
 import 'package:ChatApp/Screen/login.dart';
 import 'package:ChatApp/Animation/RouteAnimation.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +17,84 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _isLoading = false;
+  bool _notificationsEnabled = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotificationPreference();
+  }
+
+  Future<void> _loadNotificationPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _notificationsEnabled = prefs.getBool('notificationsEnabled') ?? true;
+    });
+  }
+
+  Future<void> _toggleNotifications(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await NotificationService().setNotificationsEnabled(value);
+    await prefs.setBool('notificationsEnabled', value);
+    setState(() {
+      _notificationsEnabled = value;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(value ? 'تم تشغيل الإشعارات' : 'تم إيقاف الإشعارات'),
+          backgroundColor: value ? Colors.green : Colors.orange,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  void _showAboutDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF075E54).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.chat, color: Color(0xFF075E54)),
+            ),
+            const SizedBox(width: 12),
+            const Text('ChatApp'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('الإصدار 1.0.0', style: TextStyle(color: Colors.grey[600])),
+            const SizedBox(height: 12),
+            Text(
+              'تطبيق محادثة فوري مبني باستخدام Flutter و Firebase.',
+              style: TextStyle(fontSize: 14, color: Colors.grey[800]),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'المطور: Adeeb',
+              style: TextStyle(color: Colors.grey[600], fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إغلاق'),
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _logout() async {
     final confirm = await showDialog<bool>(
@@ -80,8 +160,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: InkWell(
               borderRadius: BorderRadius.circular(16),
-              onTap: () {
-                // TODO: فتح تعديل الملف الشخصي
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const EditProfileScreen()),
+                );
               },
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -137,73 +220,119 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           const SizedBox(height: 16),
 
-          // ✅ أقسام الإعدادات
-          _buildSection(
-            items: [
-              _SettingItem(
-                icon: Icons.person,
-                title: 'تعديل الملف الشخصي',
-                subtitle: 'الاسم، الصورة، البريد الإلكتروني',
-                onTap: () {
-                  // TODO: فتح شاشة تعديل الملف الشخصي
-                },
-              ),
-              _SettingItem(
-                icon: Icons.notifications,
-                title: 'الإشعارات',
-                subtitle: 'إدارة إعدادات الإشعارات',
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('قريباً')),
-                  );
-                },
-              ),
-              _SettingItem(
-                icon: Icons.dark_mode,
-                title: 'الوضع المظلم',
-                subtitle: 'تغيير مظهر التطبيق',
-                trailing: Switch(
-                  value: false,
-                  onChanged: (_) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('قريباً')),
+          // ✅ الإعدادات الأساسية
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF075E54).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.person, color: Color(0xFF075E54), size: 22),
+                  ),
+                  title: const Text('تعديل الملف الشخصي', style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text('الاسم، الصورة، البريد الإلكتروني', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  trailing: const Icon(Icons.chevron_left, color: Colors.grey),
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const EditProfileScreen()),
                     );
                   },
-                  activeColor: const Color(0xFF075E54),
                 ),
-              ),
-            ],
+                const Divider(height: 1, indent: 60),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF075E54).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.notifications, color: Color(0xFF075E54), size: 22),
+                  ),
+                  title: const Text('الإشعارات', style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    _notificationsEnabled ? 'تشغيل' : 'إيقاف',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                  trailing: Switch(
+                    value: _notificationsEnabled,
+                    onChanged: _toggleNotifications,
+                    activeColor: const Color(0xFF075E54),
+                  ),
+                ),
+                const Divider(height: 1, indent: 60),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF075E54).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.dark_mode, color: Color(0xFF075E54), size: 22),
+                  ),
+                  title: const Text('الوضع المظلم', style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text('قريباً', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  trailing: Switch(
+                    value: false,
+                    onChanged: (_) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('قريباً إن شاء الله')),
+                      );
+                    },
+                    activeColor: const Color(0xFF075E54),
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
 
-          _buildSection(
-            items: [
-              _SettingItem(
-                icon: Icons.share,
-                title: 'مشاركة التطبيق',
-                subtitle: 'ادع أصدقائك لتجربة التطبيق',
-                onTap: () async {
-                  await _shareApp();
-                },
-              ),
-              _SettingItem(
-                icon: Icons.privacy_tip,
-                title: 'سياسة الخصوصية',
-                subtitle: 'تعرف على كيفية حماية بياناتك',
-                onTap: () async {
-                  final uri = Uri.parse('https://google.com');
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri);
-                  }
-                },
-              ),
-              _SettingItem(
-                icon: Icons.info,
-                title: 'حول التطبيق',
-                subtitle: 'الإصدار 1.0.0',
-                onTap: () {},
-              ),
-            ],
+          // ✅ أقسام إضافية
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF075E54).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.share, color: Color(0xFF075E54), size: 22),
+                  ),
+                  title: const Text('مشاركة التطبيق', style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text('ادع أصدقائك لتجربة التطبيق', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  trailing: const Icon(Icons.chevron_left, color: Colors.grey),
+                  onTap: () async {
+                    final uri = Uri.parse('https://github.com/adeeb2002/chat_app');
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri);
+                    }
+                  },
+                ),
+                const Divider(height: 1, indent: 60),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF075E54).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.info, color: Color(0xFF075E54), size: 22),
+                  ),
+                  title: const Text('حول التطبيق', style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text('الإصدار 1.0.0', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  trailing: const Icon(Icons.chevron_left, color: Colors.grey),
+                  onTap: _showAboutDialog,
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
 
@@ -240,66 +369,4 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ),
     );
   }
-
-  Widget _buildSection({required List<_SettingItem> items}) {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Column(
-        children: items.asMap().entries.map((entry) {
-          final i = entry.key;
-          final item = entry.value;
-          final isLast = i == items.length - 1;
-          return Column(
-            children: [
-              ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF075E54).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(item.icon, color: const Color(0xFF075E54), size: 22),
-                ),
-                title: Text(item.title, style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: item.subtitle != null
-                    ? Text(item.subtitle!, style: TextStyle(fontSize: 12, color: Colors.grey[600]))
-                    : null,
-                trailing: item.trailing ?? const Icon(Icons.chevron_left, color: Colors.grey),
-                onTap: item.onTap,
-              ),
-              if (!isLast) const Divider(height: 1, indent: 60),
-            ],
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Future<void> _shareApp() async {
-    try {
-      await launchUrl(Uri.parse('https://github.com/adeeb2002/chat_app'));
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('فشل المشاركة: $e')),
-        );
-      }
-    }
-  }
-}
-
-class _SettingItem {
-  final IconData icon;
-  final String title;
-  final String? subtitle;
-  final VoidCallback? onTap;
-  final Widget? trailing;
-
-  _SettingItem({
-    required this.icon,
-    required this.title,
-    this.subtitle,
-    this.onTap,
-    this.trailing,
-  });
 }

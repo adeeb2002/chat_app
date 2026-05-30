@@ -178,4 +178,35 @@ class NotificationService {
     print('🔴 تنظيف OneSignal...');
     _isInitialized = false;
   }
+
+  /// ✅ تشغيل/إيقاف الإشعارات
+  Future<void> setNotificationsEnabled(bool enabled) async {
+    try {
+      if (!_isInitialized) {
+        await initialize();
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+
+      if (enabled) {
+        await OneSignal.Notifications.requestPermission(true);
+        await OneSignal.User.pushSubscription.optIn();
+        print('✅ تم تشغيل الإشعارات');
+      } else {
+        await OneSignal.User.pushSubscription.optOut();
+        print('✅ تم إيقاف الإشعارات');
+      }
+    } catch (e) {
+      print('❌ خطأ في تغيير حالة الإشعارات: $e');
+    }
+  }
+
+  /// ✅ هل الإشعارات مفعلة؟
+  bool isNotificationsEnabled() {
+    if (!_isInitialized) return true;
+    try {
+      return OneSignal.User.pushSubscription.id != null;
+    } catch (e) {
+      return true;
+    }
+  }
 }
