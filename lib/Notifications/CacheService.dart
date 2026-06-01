@@ -320,7 +320,7 @@ class AdvancedCacheService {
       updatedAt: hiveChat.updatedAt,
       deletedFor: hiveChat.deletedFor,
       clearedFor: hiveChat.clearedFor,
-      isBlocked: hiveChat.isBlocked ?? false,
+      isBlocked: hiveChat.isBlocked,
       blockedBy: hiveChat.blockedBy,
       isDeletedChatForYou: false,
       unreadCount: hiveChat.unreadCount,

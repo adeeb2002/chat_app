@@ -1,4 +1,3 @@
-// model/user.dart
 class AppUser {
   final String? id;
   final String? email;
@@ -7,7 +6,7 @@ class AppUser {
   final String? imageUrl;
   final bool isOnline;
   final int lastSeen;
-  final String? password; // فقط للتطوير، لا تخزن كلمة المرور بهذا الشكل في الإنتاج
+  final String? password;
 
   AppUser({
     this.id,
@@ -23,15 +22,14 @@ class AppUser {
   Map<String, dynamic> toMap() {
     return {
       'email': email,
-      'phone' : phone,
+      'phone': phone,
       'displayName': displayName,
       'imageUrl': imageUrl,
       'isOnline': isOnline,
       'lastSeen': lastSeen,
-      'password': password
+      'password': password,
     };
   }
-
 
   AppUser copyWith({
     String? id,
@@ -39,15 +37,19 @@ class AppUser {
     String? phone,
     String? email,
     bool? isOnline,
-    String? imageUrl
+    int? lastSeen,
+    String? imageUrl,
+    String? password,
   }) {
     return AppUser(
       id: id ?? this.id,
       displayName: displayName ?? this.displayName,
-      email:this.email,
+      email: email ?? this.email,
       phone: phone ?? this.phone,
       isOnline: isOnline ?? this.isOnline,
-      imageUrl: imageUrl ?? this.imageUrl
+      lastSeen: lastSeen ?? this.lastSeen,
+      imageUrl: imageUrl ?? this.imageUrl,
+      password: password ?? this.password,
     );
   }
 
@@ -59,10 +61,40 @@ class AppUser {
       displayName: map['displayName'] ?? '',
       imageUrl: map['imageUrl'] ?? 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRGa70BgePn1Rsf41oiG6ac0_TAzpKXj4d9qg&s',
       isOnline: map['isOnline'] ?? false,
-      lastSeen: map['lastSeen'] ?? 0,
-      password: map['password'] ?? ''
+      lastSeen: map['lastSeen'] is int ? map['lastSeen'] : 0,
+      password: map['password'] ?? '',
     );
   }
 
   String get name => displayName.isNotEmpty ? displayName : (email?.split('@')[0] ?? 'User');
+
+  /// دالة مساعدة لعرض آخر ظهور بشكل مقروء
+  String get lastSeenText {
+    if (lastSeen == 0) return 'غير معروف';
+
+    final now = DateTime.now();
+    final lastSeenDate = DateTime.fromMillisecondsSinceEpoch(lastSeen);
+    final diff = now.difference(lastSeenDate);
+
+    if (diff.inSeconds < 60) {
+      return 'الآن';
+    } else if (diff.inMinutes < 60) {
+      return 'منذ ${diff.inMinutes} دقيقة';
+    } else if (diff.inHours < 24 && now.day == lastSeenDate.day) {
+      return 'آخر ظهور اليوم ${_formatTime(lastSeenDate)}';
+    } else if (diff.inDays == 1) {
+      return 'أمس ${_formatTime(lastSeenDate)}';
+    } else if (diff.inDays < 7) {
+      return 'منذ ${diff.inDays} أيام';
+    } else {
+      return '${lastSeenDate.day}/${lastSeenDate.month}/${lastSeenDate.year}';
+    }
+  }
+
+  String _formatTime(DateTime date) {
+    final hour = date.hour > 12 ? date.hour - 12 : date.hour;
+    final minute = date.minute.toString().padLeft(2, '0');
+    final period = date.hour >= 12 ? 'م' : 'ص';
+    return '$hour:$minute $period';
+  }
 }

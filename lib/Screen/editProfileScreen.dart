@@ -1,6 +1,6 @@
-import 'dart:io';
 import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:ChatApp/service/ImageUploadService.dart';
+import 'package:ChatApp/theme/app_theme.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -86,7 +86,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
               const Text('تغيير الصورة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               ListTile(
-                leading: const Icon(Icons.photo_library, color: Colors.green),
+                leading: Icon(Icons.photo_library, color: AppTheme.primaryLight),
                 title: const Text('اختيار من المعرض'),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -94,7 +94,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.camera_alt, color: Colors.green),
+                leading: Icon(Icons.camera_alt, color: AppTheme.primaryLight),
                 title: const Text('التقاط صورة'),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -130,7 +130,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 
     setState(() => _isSaving = true);
     try {
-      final database = ref.read(firebaseDatabaseProvider);
+      final database = FirebaseDatabase.instance;
 
       final updates = <String, dynamic>{
         'email': newEmail,
@@ -156,7 +156,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('تم تحديث البيانات بنجاح'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppTheme.successColor,
           ),
         );
         Navigator.pop(context);
@@ -180,12 +180,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppTheme.surfaceContainer(context),
       appBar: AppBar(
         title: const Text('تعديل الملف الشخصي'),
         centerTitle: true,
-        backgroundColor: const Color(0xFF075E54),
-        foregroundColor: Colors.white,
         elevation: 0,
       ),
       body: ListView(
@@ -201,14 +199,14 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.green.withOpacity(0.3),
+                        color: AppTheme.primaryLight.withValues(alpha: 0.3),
                         blurRadius: 10,
                       ),
                     ],
                   ),
                   child: CircleAvatar(
                     radius: 65,
-                    backgroundColor: const Color(0xFF075E54).withOpacity(0.1),
+                    backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                     backgroundImage: _selectedImageUrl != null && _selectedImageUrl!.isNotEmpty
                         ? NetworkImage(_selectedImageUrl!)
                         : null,
@@ -217,10 +215,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             user.displayName.isNotEmpty
                                 ? user.displayName[0].toUpperCase()
                                 : 'U',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 52,
                               fontWeight: FontWeight.bold,
-                              color: Color(0xFF075E54),
+                              color: Theme.of(context).colorScheme.primary,
                             ),
                           )
                         : null,
@@ -233,8 +231,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     onTap: _isUploading ? null : _showImagePickerDialog,
                     child: Container(
                       padding: const EdgeInsets.all(8),
-                      decoration: const BoxDecoration(
-                        color: Colors.green,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryLight,
                         shape: BoxShape.circle,
                       ),
                       child: _isUploading
@@ -262,7 +260,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             controller: _nameController,
             decoration: InputDecoration(
               hintText: 'أدخل اسمك',
-              prefixIcon: const Icon(Icons.person, color: Color(0xFF075E54)),
+              prefixIcon: Icon(Icons.person, color: Theme.of(context).colorScheme.primary),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -282,7 +280,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             keyboardType: TextInputType.emailAddress,
             decoration: InputDecoration(
               hintText: 'example@gmail.com',
-              prefixIcon: const Icon(Icons.email, color: Color(0xFF075E54)),
+              prefixIcon: Icon(Icons.email, color: Theme.of(context).colorScheme.primary),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -300,7 +298,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: Colors.grey[200],
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -309,7 +307,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 const SizedBox(width: 12),
                 Text(
                   user.phone,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const Spacer(),
                 const Icon(Icons.lock, color: Colors.grey, size: 16),
@@ -319,7 +317,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           const SizedBox(height: 8),
           Text(
             'لا يمكن تغيير رقم الهاتف',
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
           ),
           const SizedBox(height: 32),
 
@@ -329,14 +327,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             height: 50,
             child: ElevatedButton(
               onPressed: _isSaving ? null : _saveProfile,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF075E54),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                elevation: 2,
-              ),
               child: _isSaving
                   ? const SizedBox(
                       width: 20,

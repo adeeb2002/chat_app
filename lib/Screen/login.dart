@@ -2,13 +2,13 @@
 
 import 'dart:async';
 import 'package:ChatApp/Animation/RouteAnimation.dart';
+import 'package:ChatApp/Provider/network_provider.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
-import 'package:ChatApp/Screen/home.dart';
+import 'package:ChatApp/Screen/main_app_shell.dart';
 import 'package:ChatApp/model/user.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../service/hash_service.dart';
 
@@ -23,7 +23,6 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
-  final _formKey = GlobalKey<FormState>();
 
   // Controllers for Login
   final loginPhoneController = TextEditingController();
@@ -48,22 +47,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _phoneVerified = false;
   String? _verifiedUserEmail;
 
-  bool isConnected = false;
-  StreamSubscription? connectionSubscription;
-
   @override
   void initState() {
     super.initState();
-    connectionSubscription = InternetConnection().onStatusChange.listen((status) async {
-      final hasConnection = status == InternetStatus.connected;
-      if (isConnected != hasConnection) {
-        if (mounted) {
-          setState(() {
-            isConnected = hasConnection;
-          });
-        }
-      }
-    });
   }
 
   @override
@@ -77,7 +63,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     forgotPhoneController.dispose();
     newPasswordController.dispose();
     confirmNewPasswordController.dispose();
-    connectionSubscription?.cancel();
     super.dispose();
   }
 
@@ -157,7 +142,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           _showSuccessSnackBar('تم تسجيل الدخول بنجاح');
           Navigator.pushAndRemoveUntil(
             context,
-            RouteAnimation.slideFromRight(HomeScreen()),
+            RouteAnimation.slideFromRight(MainAppShell()),
             (route) => false,
           );
         } else {
@@ -228,7 +213,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           _showSuccessSnackBar('تم إنشاء الحساب بنجاح');
           Navigator.pushAndRemoveUntil(
             context,
-            RouteAnimation.slideFromRight(HomeScreen()),(route) => false,
+            RouteAnimation.slideFromRight(MainAppShell()),(route) => false,
           );
         }
       } else {
@@ -355,6 +340,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isConnected = ref.watch(internetConnectionProvider);
+
     if (_isForgotPasswordMode) {
       return _buildForgotPasswordScreen();
     }

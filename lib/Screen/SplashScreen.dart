@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'package:ChatApp/Animation/RouteAnimation.dart';
+import 'package:ChatApp/Provider/network_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../Provider/userProvide.dart';
-import 'home.dart';
+import 'main_app_shell.dart';
 import 'login.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
@@ -31,7 +32,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   void initState() {
     super.initState();
 
-    // ─── أنيميشن الأيقونة (تظهر من المركز مع دوران) ───
     _iconController = AnimationController(
       duration: const Duration(milliseconds: 1200),
       vsync: this,
@@ -45,7 +45,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       CurvedAnimation(parent: _iconController, curve: Curves.easeOutBack),
     );
 
-    // ─── أنيميشن النص (يظهر من الأسفل) ───
     _textController = AnimationController(
       duration: const Duration(milliseconds: 800),
       vsync: this,
@@ -62,7 +61,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       CurvedAnimation(parent: _textController, curve: Curves.easeIn),
     );
 
-    // ─── أنيميشن الخط الفاصل (يتوسع) ───
     _dotController = AnimationController(
       duration: const Duration(milliseconds: 600),
       vsync: this,
@@ -72,7 +70,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       CurvedAnimation(parent: _dotController, curve: Curves.easeOutCubic),
     );
 
-    // ─── تشغيل الأنيميشنات بالتتابع ───
     _startAnimations();
     _initApp();
   }
@@ -98,30 +95,35 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       final isLoggedIn = prefs.getBool('isLogin') ?? false;
       final userPhone = prefs.getString('phone');
       final userId = prefs.getString('userId');
+      final isOnline = ref.read(internetConnectionProvider);
 
       if (isLoggedIn && userPhone != null && userId != null) {
         final authService = ref.read(authServiceProvider);
-        await authService.updateUserStatus(userId, false);
 
-        Future.delayed(const Duration(seconds: 2), () {
-          if (authService.isConnected) {
-            authService.updateUserStatus(userId, true);
-          }
-        });
+        // ✅ إعداد Firebase Presence
+        // هذا سيقوم بـ:
+        // 1. تحديث الحالة إلى Online
+        // 2. تسجيل onDisconnect لتحويلها Offline تلقائياً عند انقطاع الاتصال
+        if (isOnline) {
+          authService.setupPresence(userId);
+        } else {
+          // إذا لم يكن متصلاً بالنت، تأكد من أنه Offline في Firebase
+          await authService.goOffline(userId);
+        }
       }
 
       if (mounted) {
         if (isLoggedIn && userPhone != null && userPhone.isNotEmpty) {
           Navigator.pushAndRemoveUntil(
             context,
-            RouteAnimation.slideFromRight(const HomeScreen()),
-            (route) => false,
+            RouteAnimation.slideFromRight(const MainAppShell()),
+                (route) => false,
           );
         } else {
           Navigator.pushAndRemoveUntil(
             context,
             RouteAnimation.slideRightAndFade(const LoginScreen()),
-            (route) => false,
+                (route) => false,
           );
         }
       }
@@ -130,7 +132,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
         Navigator.pushAndRemoveUntil(
           context,
           RouteAnimation.slideRightAndFade(const LoginScreen()),
-          (route) => false,
+              (route) => false,
         );
       }
     }
@@ -168,7 +170,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
             children: [
               const Spacer(flex: 3),
 
-              // ─── الأيقونة ───
               AnimatedBuilder(
                 animation: _iconController,
                 builder: (context, child) {
@@ -185,10 +186,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   height: 130,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white.withOpacity(0.15),
+                    color: Colors.white.withValues(alpha: 0.15),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 30,
                         spreadRadius: 5,
                       ),
@@ -198,7 +199,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     margin: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.2),
+                      color: Colors.white.withValues(alpha: 0.2),
                     ),
                     child: const Icon(
                       Icons.chat_rounded,
@@ -211,7 +212,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
               const SizedBox(height: 32),
 
-              // ─── اسم التطبيق ───
               SlideTransition(
                 position: _textSlide,
                 child: FadeTransition(
@@ -230,7 +230,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
               const SizedBox(height: 12),
 
-              // ─── الخط الفاصل ───
               AnimatedBuilder(
                 animation: _dotController,
                 builder: (context, child) {
@@ -238,7 +237,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     width: _dotWidth.value,
                     height: 3,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.6),
+                      color: Colors.white.withValues(alpha: 0.6),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   );
@@ -247,7 +246,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
               const SizedBox(height: 12),
 
-              // ─── الشعار ───
               SlideTransition(
                 position: _textSlide,
                 child: FadeTransition(
@@ -256,7 +254,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     'تواصل بكل سهولة',
                     style: TextStyle(
                       fontSize: 16,
-                      color: Colors.white.withOpacity(0.85),
+                      color: Colors.white.withValues(alpha: 0.85),
                       fontWeight: FontWeight.w500,
                       letterSpacing: 1,
                     ),
@@ -266,7 +264,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
               const Spacer(flex: 3),
 
-              // ─── مؤشر التحميل ───
               FadeTransition(
                 opacity: _textFade,
                 child: SizedBox(
@@ -274,7 +271,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   height: 24,
                   child: CircularProgressIndicator(
                     strokeWidth: 2.5,
-                    color: Colors.white.withOpacity(0.7),
+                    color: Colors.white.withValues(alpha: 0.7),
                   ),
                 ),
               ),

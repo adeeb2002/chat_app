@@ -12,8 +12,6 @@ class Message {
   final String? originalBody;
   final bool isSynced;
 
-
-
   Message({
     required this.id,
     required this.senderUser,
@@ -40,16 +38,16 @@ class Message {
   }) {
     final now = DateTime.now().millisecondsSinceEpoch;
     return Message(
-      id: '', // سيتم استبداله بـ key من Firebase في الـ Service
-      senderUser: senderUser,
-      resevUser: resevUser,
-      body: body,
-      chatId: chatId,
-      timestamp: now,
-      isRead: false,
-      type: type,
-      isDeleted: false,
-      isSynced: isSynced
+        id: '', // سيتم استبداله بـ key من Firebase في الـ Service
+        senderUser: senderUser,
+        resevUser: resevUser,
+        body: body,
+        chatId: chatId,
+        timestamp: now,
+        isRead: false,
+        type: type,
+        isDeleted: false,
+        isSynced: isSynced
     );
   }
 
@@ -69,21 +67,22 @@ class Message {
     bool? isSynced
   }) {
     return Message(
-      id: id ?? this.id,
-      chatId: chatId ?? this.chatId,
-      senderUser: senderUser ?? this.senderUser,
-      resevUser: resevUser ?? this.resevUser,
-      body: body ?? this.body,
-      timestamp: timestamp ?? this.timestamp,
-      isRead: isRead ?? this.isRead,
-      type: type ?? this.type,
-      isDeleted: isDeleted ?? this.isDeleted,
-      editedAt: editedAt ?? this.editedAt,
-      originalBody: originalBody ?? this.originalBody,
-      isSynced: isSynced ?? this.isSynced
+        id: id ?? this.id,
+        chatId: chatId ?? this.chatId,
+        senderUser: senderUser ?? this.senderUser,
+        resevUser: resevUser ?? this.resevUser,
+        body: body ?? this.body,
+        timestamp: timestamp ?? this.timestamp,
+        isRead: isRead ?? this.isRead,
+        type: type ?? this.type,
+        isDeleted: isDeleted ?? this.isDeleted,
+        editedAt: editedAt ?? this.editedAt,
+        originalBody: originalBody ?? this.originalBody,
+        isSynced: isSynced ?? this.isSynced
     );
   }
 
+  // تحويل إلى Map (للاستخدام المحلي)
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -97,11 +96,29 @@ class Message {
       'isDeleted': isDeleted,
       'editedAt': editedAt,
       'originalBody': originalBody,
-      'isSynced': isSynced,  // ← جديد
+      'isSynced': isSynced,
     };
   }
 
-// عدّل fromMap()
+  // تحويل إلى JSON (للحفظ في SharedPreferences والإرسال إلى Firebase)
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'senderUser': senderUser,
+      'resevUser': resevUser,
+      'body': body, // نحفظ الـ body الأصلي بدون تعديل
+      'chatId': chatId,
+      'timestamp': timestamp,
+      'isRead': isRead,
+      'type': type.index,
+      'isDeleted': isDeleted,
+      'editedAt': editedAt,
+      'originalBody': originalBody,
+      'isSynced': isSynced,
+    };
+  }
+
+  // استخراج من Map
   factory Message.fromMap(Map<dynamic, dynamic> map) {
     return Message(
       id: map['id']?.toString() ?? '',
@@ -119,7 +136,29 @@ class Message {
       isDeleted: map['isDeleted'] == true,
       editedAt: map['editedAt']?.toString(),
       originalBody: map['originalBody']?.toString(),
-      isSynced: map['isSynced'] ?? true,  // ← جديد، افتراضي true للرسائل القديمة
+      isSynced: map['isSynced'] ?? true,
+    );
+  }
+
+  // استخراج من JSON
+  factory Message.fromJson(Map<String, dynamic> json) {
+    return Message(
+      id: json['id']?.toString() ?? '',
+      senderUser: json['senderUser']?.toString() ?? '',
+      resevUser: json['resevUser']?.toString() ?? '',
+      body: json['body']?.toString() ?? '',
+      chatId: json['chatId']?.toString() ?? '',
+      timestamp: json['timestamp'] is int
+          ? json['timestamp']
+          : int.tryParse(json['timestamp']?.toString() ?? '0') ?? 0,
+      isRead: json['isRead'] == true,
+      type: json['type'] != null && json['type'] is int && json['type'] < MessageType.values.length
+          ? MessageType.values[json['type']]
+          : MessageType.text,
+      isDeleted: json['isDeleted'] == true,
+      editedAt: json['editedAt']?.toString(),
+      originalBody: json['originalBody']?.toString(),
+      isSynced: json['isSynced'] ?? true,
     );
   }
 
@@ -128,6 +167,25 @@ class Message {
 
   // دوال مساعدة للتحقق من هوية المرسل
   bool isFromMe(String myEmail) => senderUser == myEmail;
+
+  @override
+  String toString() {
+    return 'Message(id: $id, sender: $senderUser, receiver: $resevUser, body: $body, chatId: $chatId, timestamp: $timestamp, isRead: $isRead, type: $type, isDeleted: $isDeleted, isSynced: $isSynced)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is Message && other.id == id;
+  }
+
+  @override
+  int get hashCode => id.hashCode;
 }
 
-enum MessageType { text, image, audio, video }
+enum MessageType {
+  text,
+  image,
+  audio,
+  video
+}

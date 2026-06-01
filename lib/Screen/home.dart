@@ -5,20 +5,20 @@ import 'package:ChatApp/Provider/chatProvider.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:ChatApp/Screen/addChatScreen.dart';
 import 'package:ChatApp/Screen/login.dart';
-import 'package:ChatApp/Screen/settingsScreen.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
+
 import '../Notifications/CacheService.dart';
 import '../model/chat.dart';
 import '../model/user.dart';
 import '../service/ImageUploadService.dart';
+import '../theme/app_theme.dart';
 import 'chatScreen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -36,11 +36,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   StreamSubscription? connectionSubscription;
   String _searchQuery = '';
   late final AdvancedCacheService _cacheService;
+
   bool _isOfflineMode = false;
-
-  // ✅ متغير لتتبع أول مرة يتم فيها التحميل
   bool _isFirstLoad = true;
-
   @override
   bool get wantKeepAlive => true;
 
@@ -373,93 +371,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         backgroundColor: const Color(0xFF075E54),
         foregroundColor: Colors.white,
         elevation: 0,
-        actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            color: Colors.white,
-            onSelected: (value) {
-              if (value == 'logout') {
-                _logout();
-              } else if (value == 'profile') {
-                _showProfileBottomSheet();
-              } else if (value == 'settings') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                );
-              } else if (value == 'share') {
-                _showShareOptions();
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'profile',
-                child: Row(
-                  children: [
-                    Icon(Icons.person, size: 20, color: Colors.black),
-                    SizedBox(width: 12),
-                    Text(
-                      'الملف الشخصي',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'share',
-                child: Row(
-                  children: [
-                    Icon(Icons.share, size: 20, color: Colors.green),
-                    SizedBox(width: 12),
-                    Text(
-                      'مشاركة التطبيق',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'settings',
-                child: Row(
-                  children: [
-                    Icon(Icons.settings, size: 20, color: Colors.grey),
-                    SizedBox(width: 12),
-                    Text(
-                      'الإعدادات',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'logout',
-                child: Row(
-                  children: [
-                    Icon(Icons.logout, size: 20, color: Colors.red),
-                    SizedBox(width: 12),
-                    Text(
-                      'تسجيل الخروج',
-                      style: TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
       ),
       body: Stack(
         children: [
@@ -498,20 +409,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.orange[50],
+                    color: AppTheme.warningColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.orange[200]!),
+                    border: Border.all(color: AppTheme.warningColor.withValues(alpha: 0.3)),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.wifi_off, size: 18, color: Colors.orange[700]),
+                      Icon(Icons.wifi_off, size: 18, color: AppTheme.warningColor),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'لا يوجد اتصال بالإنترنت، يتم عرض الرسائل المحفوظة فقط',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.orange[700],
+                            color: AppTheme.warningColor,
                           ),
                         ),
                       ),
@@ -613,118 +524,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  void _showShareOptions() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'شارك التطبيق مع أصدقائك',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ),
-            ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: Color(0xFF25D366),
-                child: Icon(Icons.chat, color: Colors.white),
-              ),
-              title: const Text('مشاركة على واتساب'),
-              onTap: () {
-                Navigator.pop(context);
-                _shareOnWhatsApp();
-              },
-            ),
-            ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: Colors.blue,
-                child: Icon(Icons.share, color: Colors.white),
-              ),
-              title: const Text('مشاركة عامة'),
-              onTap: () {
-                Navigator.pop(context);
-                _shareGeneral();
-              },
-            ),
-            ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: Colors.purple,
-                child: Icon(Icons.link, color: Colors.white),
-              ),
-              title: const Text('نسخ رابط التحميل'),
-              onTap: () {
-                Navigator.pop(context);
-                _copyDownloadLink();
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _shareOnWhatsApp() async {
-    const message = '''
-📱 **تطبيق المحادثات - تواصل بكل سهولة!**
-
-✨ **مميزات التطبيق:**
-• 💬 محادثات فورية وآمنة
-• 🔒 تشفير كامل للرسائل
-• 📸 مشاركة الصور والملفات
-• 🎤 رسائل صوتية
-• 🔔 إشعارات فورية
-
-📥 حمّل التطبيق الآن:
-https://play.google.com/store/apps/details?id=com.example.chatapp
-
-🌟 انضم إلى آلاف المستخدمين!
-    ''';
-
-    final whatsappUrl = 'whatsapp://send?text=${Uri.encodeComponent(message)}';
-    try {
-      if (await canLaunchUrl(Uri.parse(whatsappUrl))) {
-        await launchUrl(Uri.parse(whatsappUrl));
-      } else {
-        Fluttertoast.showToast(msg: 'واتساب غير مثبت على جهازك');
-        _shareGeneral();
-      }
-    } catch (e) {
-      Fluttertoast.showToast(msg: 'حدث خطأ، حاول مرة أخرى');
-      _shareGeneral();
-    }
-  }
-
-  void _shareGeneral() async {
-    const message = '''
-📱 تطبيق المحادثات - تواصل بكل سهولة!
-
-مميزات التطبيق:
-• محادثات فورية وآمنة
-• تشفير كامل للرسائل
-• مشاركة الصور والملفات
-• رسائل صوتية
-• إشعارات فورية
-
-حمّل التطبيق الآن:
-https://play.google.com/store/apps/details?id=com.example.chatapp
-    ''';
-
-    await Share.share(message, subject: 'حمّل تطبيق المحادثات');
-  }
-
-  void _copyDownloadLink() async {
-    const link =
-        'https://play.google.com/store/apps/details?id=com.example.chatapp';
-    await Clipboard.setData(const ClipboardData(text: link));
-    Fluttertoast.showToast(msg: 'تم نسخ رابط التحميل');
-  }
-
   Widget _buildChatList(List<Chat> chats, String currentUserPhone) {
     final filteredChats = chats.where((chat) {
       final otherPhone = chat.getOtherParticipant(currentUserPhone);
@@ -787,6 +586,7 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
 
   // ✅ دالة محسنة لعرض عنصر تحميل مع بيانات مؤقتة
   Widget _buildLoadingChatTile(Chat chat, String otherPhone) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.all(8.0),
       child: InkWell(
@@ -798,25 +598,25 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
         ),
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.grey[100],
+            color: AppTheme.surfaceContainer(context),
             borderRadius: BorderRadius.circular(15),
           ),
           child: ListTile(
             leading: CircleAvatar(
               radius: 28,
-              backgroundColor: Colors.green[50],
+              backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
               child: Text(
                 otherPhone.isNotEmpty ? otherPhone[0].toUpperCase() : '?',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
-                  color: Colors.green,
+                  color: theme.colorScheme.primary,
                 ),
               ),
             ),
             title: Text(
               otherPhone,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              style: theme.textTheme.titleMedium,
             ),
             subtitle: Text(
               chat.lastMessage.isNotEmpty
@@ -824,10 +624,11 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                   : 'جاري التحميل...',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall,
             ),
             trailing: Text(
               _formatTime(chat.lastMessageTime),
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+              style: TextStyle(fontSize: 11, color: theme.textTheme.bodySmall?.color),
             ),
           ),
         ),
@@ -843,6 +644,8 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
     required String currentUserPhone,
   }) {
     final String cleanPhoneKey = currentUserPhone.replaceAll('+', 'p');
+    final theme = Theme.of(context);
+    final primaryColor = theme.colorScheme.primary;
 
     int unreadCount = 0;
     if (chat.unreadCount is int) {
@@ -909,13 +712,13 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
         padding: const EdgeInsets.all(8.0),
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.grey[100],
+            color: AppTheme.surfaceContainer(context),
             borderRadius: BorderRadius.circular(15),
           ),
           child: ListTile(
             leading: CircleAvatar(
               radius: 28,
-              backgroundColor: Colors.green[50],
+              //backgroundColor: primaryColor,
               child: imageUrl != null && imageUrl.isNotEmpty
                   ? ClipOval(
                       child: Image.network(
@@ -925,26 +728,26 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => Text(
                           name[0].toUpperCase(),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
-                            color: Colors.green,
+                            color: theme.colorScheme.onPrimary,
                           ),
                         ),
                       ),
                     )
                   : Text(
                       name[0].toUpperCase(),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: Colors.green,
+                        color: theme.colorScheme.onPrimary,
                       ),
                     ),
             ),
             title: Text(
               name,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              style: theme.textTheme.titleMedium,
             ),
             subtitle: Text(
               chat.isBlocked ?? false
@@ -955,7 +758,7 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: hasUnread ? Colors.black87 : Colors.grey[600],
+                color: hasUnread ? AppTheme.textPrimary(context) : AppTheme.textSecondary(context),
                 fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
               ),
             ),
@@ -969,8 +772,8 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                   Text(
                     _formatTime(chat.lastMessageTime),
                     style: TextStyle(
-                      fontSize: 11,
-                      color: hasUnread ? const Color(0xFF25D366) : Colors.grey,
+                      fontSize: 8,
+                      color: hasUnread ? AppTheme.primaryLight : AppTheme.textSecondary(context),
                       fontWeight: hasUnread
                           ? FontWeight.bold
                           : FontWeight.normal,
@@ -980,8 +783,8 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                   if (hasUnread)
                     Container(
                       padding: const EdgeInsets.all(6),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF25D366),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryLight,
                         shape: BoxShape.circle,
                       ),
                       constraints: const BoxConstraints(
@@ -1037,35 +840,16 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
     );
   }
 
-  Widget _buildErrorChatTile(String error) {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.red[50],
-          borderRadius: BorderRadius.circular(15),
-        ),
-        child: const ListTile(
-          leading: CircleAvatar(
-            radius: 28,
-            backgroundColor: Colors.red,
-            child: Icon(Icons.error, color: Colors.white),
-          ),
-          title: Text('خطأ في التحميل'),
-          subtitle: Text('يرجى المحاولة مرة أخرى'),
-        ),
-      ),
-    );
-  }
+
 
   Widget _buildEmptyState(AppUser currentUser) {
+    final theme = Theme.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // ─── أيقونة متحركة ───
             Container(
               width: 140,
               height: 140,
@@ -1075,8 +859,8 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    const Color(0xFF075E54).withOpacity(0.1),
-                    const Color(0xFF25D366).withOpacity(0.1),
+                    theme.colorScheme.primary.withValues(alpha: 0.1),
+                    AppTheme.primaryLight.withValues(alpha: 0.1),
                   ],
                 ),
               ),
@@ -1084,38 +868,36 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                 margin: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: const Color(0xFF075E54).withOpacity(0.1),
+                  color: theme.colorScheme.primary.withValues(alpha: 0.1),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.chat_rounded,
                   size: 64,
-                  color: Color(0xFF075E54),
+                  color: theme.colorScheme.primary,
                 ),
               ),
             ),
             const SizedBox(height: 32),
 
-            // ─── الترحيب ───
             Text(
               'مرحباً ${currentUser.displayName}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF075E54),
+                color: theme.colorScheme.primary,
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
 
-            // ─── الوصف ───
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppTheme.surfaceContainer(context),
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.03),
+                    color: theme.shadowColor.withValues(alpha: 0.03),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -1142,7 +924,6 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
             ),
             const SizedBox(height: 32),
 
-            // ─── زر البدء ───
             SizedBox(
               width: double.infinity,
               height: 50,
@@ -1173,22 +954,23 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
   }
 
   Widget _buildFeatureRow({required IconData icon, required String text}) {
+    final theme = Theme.of(context);
     return Row(
       children: [
         Container(
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
-            color: const Color(0xFF075E54).withOpacity(0.08),
+            color: theme.colorScheme.primary.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(icon, size: 18, color: const Color(0xFF075E54)),
+          child: Icon(icon, size: 18, color: theme.colorScheme.primary),
         ),
         const SizedBox(width: 12),
         Text(
           text,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
-            color: Color(0xFF667781),
+            color: AppTheme.textSecondary(context),
           ),
         ),
       ],
@@ -1196,15 +978,16 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
   }
 
   Widget _buildErrorState(String error) {
+    final theme = Theme.of(context);
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.error_outline, size: 64, color: Colors.red),
+          Icon(Icons.error_outline, size: 64, color: AppTheme.errorColor),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             'حدث خطأ',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: theme.textTheme.titleLarge,
           ),
           const SizedBox(height: 8),
           Padding(
@@ -1212,7 +995,7 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
             child: Text(
               error,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.grey),
+              style: TextStyle(color: AppTheme.textSecondary(context)),
             ),
           ),
           const SizedBox(height: 24),
@@ -1226,7 +1009,6 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
             },
             icon: const Icon(Icons.refresh),
             label: const Text('إعادة المحاولة'),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
           ),
         ],
       ),
@@ -1234,187 +1016,7 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
   }
 
   // ✅ نافذة الملف الشخصي
-  void _showProfileBottomSheet() {
-    final currentUser = ref.read(appUserDataProvider);
-    if (currentUser == null) return;
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(30),
-              topRight: Radius.circular(30),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                margin: const EdgeInsets.only(top: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.green.withOpacity(0.3),
-                            blurRadius: 5,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      child: CircleAvatar(
-                        radius: 60,
-                        backgroundColor: const Color(
-                          0xFF075E54,
-                        ).withOpacity(0.1),
-                        child: currentUser.imageUrl != null
-                            ? Container(
-                                height: double.infinity,
-                                width: double.infinity,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(60),
-                                  image: DecorationImage(
-                                    fit: BoxFit.cover,
-                                    image: NetworkImage(currentUser.imageUrl!),
-                                  ),
-                                ),
-                              )
-                            : Text(
-                                currentUser.displayName.isNotEmpty
-                                    ? currentUser.displayName[0].toUpperCase()
-                                    : 'U',
-                                style: const TextStyle(
-                                  fontSize: 48,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF075E54),
-                                ),
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      currentUser.displayName,
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[100],
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        currentUser.phone ?? 'رقم الهاتف غير متوفر',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[700],
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Chip(
-                      avatar: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isConnected ? Colors.green : Colors.grey,
-                        ),
-                      ),
-                      label: Text(
-                        isConnected ? 'متصل الآن' : 'غير متصل',
-                        style: TextStyle(
-                          color: isConnected
-                              ? Colors.green[700]
-                              : Colors.grey[700],
-                        ),
-                      ),
-                      backgroundColor: isConnected
-                          ? Colors.green.withOpacity(0.1)
-                          : Colors.grey.withOpacity(0.1),
-                    ),
-                    const SizedBox(height: 32),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              Navigator.pop(context);
-                              _showEditProfileBottomSheet();
-                            },
-                            icon: const Icon(Icons.edit, size: 20),
-                            label: const Text(
-                              'تعديل',
-                              style: TextStyle(
-                                color: Colors.green,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.green,
-                              side: const BorderSide(color: Colors.green),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => Navigator.pop(context),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF075E54),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: const Text(
-                              'إغلاق',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
-        );
-      },
-    );
-  }
 
   // ✅ نافذة تعديل الملف الشخصي
   void _showEditProfileBottomSheet() {
@@ -1521,13 +1123,7 @@ https://play.google.com/store/apps/details?id=com.example.chatapp
                             ),
                             const SizedBox(height: 10),
                             InkWell(
-                              onTap: () => _showImagePickerOptions(context, setModalState, (p0) {
-
-                              }, () {
-
-                              }, () {
-
-                              },),
+                              onTap: () => _showImagePickerOptions(context, setModalState, (p0) {}, () {}, () {}),
                               child: Container(
                                 height: 30,
                                 width: 80,

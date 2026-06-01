@@ -1,10 +1,9 @@
 // lib/Provider/messageProvider.dart
 
 import 'dart:async';
-import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../Notifications/CacheService.dart';
 import '../Notifications/PendingNotificationsService.dart';
 import '../Notifications/notifications.dart';
@@ -22,7 +21,6 @@ final messageServiceProvider = Provider<MessageService>((ref) {
 final messagesProvider = StreamProvider.family<List<Message>, String>((ref, chatId) {
   final db = FirebaseDatabase.instance;
   final cacheService = AdvancedCacheService();
-  final currentUserPhone = ref.watch(appUserPhoneProvider);
 
   final controller = StreamController<List<Message>>.broadcast();
 
@@ -80,12 +78,13 @@ class MessageService {
 
     try {
       final chatRef = db.ref('chats').child(message.chatId).child('messages');
-      final newMessageRef = chatRef.push();
+      final newMessageRef = chatRef.child(messageId);
 
-      final messageWithId = message.toMap();
-      messageWithId['id'] = newMessageRef.key;
+      // ✅ استخدام toJson() بدلاً من toMap() لضمان حفظ type كـ int (0, 1, 2...)
+      final messageData = message.toJson();
+      messageData['id'] = messageId;
 
-      await newMessageRef.set(messageWithId);
+      await newMessageRef.set(messageData);
 
       // ✅ تحديث المحادثة باستخدام Transaction
       final chatMainRef = db.ref('chats').child(message.chatId);
@@ -96,7 +95,8 @@ class MessageService {
 
         final Map<String, dynamic> chatMap = Map<String, dynamic>.from(chatData as Map);
 
-        chatMap['lastMessage'] = message.body;
+        // ✅ إصلاح: إذا كانت الرسالة صورة، اعرض "📷 صورة" بدلاً من الرابط في قائمة المحادثات
+        chatMap['lastMessage'] = message.type == MessageType.image ? '📷 صورة' : message.body;
         chatMap['lastMessageTime'] = message.timestamp;
         chatMap['lastMessageSender'] = message.senderUser;
         chatMap['updatedAt'] = message.timestamp;
@@ -113,26 +113,27 @@ class MessageService {
         return Transaction.success(chatMap);
       });
 
+      // ✅ إصلاح نص الإشعار: لا ترسل رابط الصورة في الإشعار
+      final notificationBody = message.type == MessageType.image ? '📷 صورة' : message.body;
+
       // ✅ إرسال الإشعار
-      final isConnected = await InternetConnection().hasInternetAccess.timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => false,
-      );
+      final List<ConnectivityResult> result = await Connectivity().checkConnectivity();
+      final isConnected = result.contains(ConnectivityResult.mobile) || result.contains(ConnectivityResult.wifi);
 
       if (isConnected) {
         final success = await NotificationService().sendMessageNotification(
           targetPhone: message.resevUser,
           senderName: message.senderUser,
-          messageBody: message.body,
+          messageBody: notificationBody, // ✅ استخدام النص المعدل
           chatId: message.chatId,
           messageId: messageId,
         );
 
         if (!success) {
-          await _addToPendingQueue(message, messageId);
+          await _addToPendingQueue(message, messageId, notificationBody);
         }
       } else {
-        await _addToPendingQueue(message, messageId);
+        await _addToPendingQueue(message, messageId, notificationBody);
       }
 
       print('✅ تم إرسال الرسالة بنجاح');
@@ -142,14 +143,14 @@ class MessageService {
     }
   }
 
-  Future<void> _addToPendingQueue(Message message, String messageId) async {
+  Future<void> _addToPendingQueue(Message message, String messageId, String notificationBody) async {
     try {
       await PendingNotificationsService().addPendingNotification(
         chatId: message.chatId,
         messageId: messageId,
         senderPhone: message.senderUser,
         receiverPhone: message.resevUser,
-        messageBody: message.body,
+        messageBody: notificationBody, // ✅ استخدام النص المعدل
         timestamp: message.timestamp,
       );
       print('✅ تم إضافة الإشعار إلى قائمة الانتظار');
@@ -218,7 +219,7 @@ class MessageService {
 
       // ✅ تحديث الكاش المحلي
       final cacheService = AdvancedCacheService();
-      await cacheService.deleteMessageFromCache(chatId,messageId);
+      await cacheService.deleteMessageFromCache(chatId, messageId);
 
       print('✅ تم حذف الرسالة بنجاح');
     } catch (e) {

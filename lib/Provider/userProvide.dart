@@ -1,11 +1,8 @@
-// lib/Provider/userProvide.dart
-
 import 'dart:async';
-import 'package:ChatApp/Provider/chatProvider.dart';
+import 'package:ChatApp/Provider/network_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../Notifications/notifications.dart';
 import '../model/user.dart';
@@ -17,11 +14,23 @@ final appUserPhoneProvider = StateProvider<String?>((ref) => null);
 final isLoadingProvider = StateProvider<bool>((ref) => false);
 final isLoginProvider = StateProvider<bool>((ref) => false);
 final currentReceiverProvider = StateProvider<AppUser?>((ref) => null);
-final internetConnectionProvider = StateProvider<bool>((ref) => true);
 
 final authServiceProvider = Provider<AuthService>((ref) {
   final db = FirebaseDatabase.instance;
-  return AuthService(db);
+  final authService = AuthService(db);
+
+  ref.listen<bool>(internetConnectionProvider, (prev, next) {
+    authService.isConnected = next;
+    if (next && authService._currentUserId != null) {
+      authService.goOnline(authService._currentUserId!);
+    } else if (!next && authService._currentUserId != null) {
+      // لا نفعل شيء هنا - onDisconnect سيتولى الأمر
+      // لكن نحدث محلياً فقط
+      authService._saveUserStatusLocally(false);
+    }
+  });
+
+  return authService;
 });
 
 final currentUserStreamProvider = StreamProvider<AppUser?>((ref) {
@@ -34,92 +43,174 @@ final userDataProvider = FutureProvider.family<AppUser?, String>((ref, phone) as
   return await service.getUserByPhone(phone);
 });
 
+// ✅ Provider جديد: استماع مباشر لحالة المستخدم من Firebase
+final userPresenceStreamProvider = StreamProvider.family<AppUser?, String>((ref, userId) {
+  final db = FirebaseDatabase.instance;
+  return db.ref('users').child(userId).onValue.map((event) {
+    final snapshot = event.snapshot;
+    if (snapshot.exists) {
+      final data = Map<String, dynamic>.from(snapshot.value as Map);
+      return AppUser.fromMap(userId, data);
+    }
+    return null;
+  });
+});
+
 class AuthService {
   final FirebaseDatabase db;
   bool isConnected = true;
-  StreamSubscription? _connectionSubscription;
   String? _currentUserId;
 
-  // ✅ متغير لتتبع حالة المستخدم في Firebase
-  bool _isUserOnlineInFirebase = false;
   Timer? _onlineStatusTimer;
+  StreamSubscription? _connectedSubscription;
 
   AuthService(this.db) {
-    _initConnectionListener();
     _setupLifecycleObserver();
-    _startOnlineStatusPing();
   }
 
-  // ✅ مراقبة حالة الاتصال
-  void _initConnectionListener() {
-    _connectionSubscription = InternetConnection().onStatusChange.listen((status) async {
-      final hasConnection = status == InternetStatus.connected;
+  // ✅ مراقبة دورة حياة التطبيق
+  void _setupLifecycleObserver() {
+    WidgetsBinding.instance.addObserver(AppLifecycleObserver(this));
+  }
 
-      if (isConnected != hasConnection) {
-        isConnected = hasConnection;
-        print('🌐 حالة الاتصال تغيرت: ${isConnected ? "متصل" : "غير متصل"}');
+  // ✅ إعداد Firebase Presence مع onDisconnect
+  void setupPresence(String userId) {
+    if (userId.isEmpty) return;
 
-        if (isConnected && _currentUserId != null) {
-          await updateUserStatus(_currentUserId!, true);
-        } else if (_currentUserId != null) {
-          await updateUserStatus(_currentUserId!, false);
+    _currentUserId = userId;
+    final userStatusRef = db.ref('users/$userId');
+    final connectedRef = db.ref('.info/connected');
+
+    // إلغاء أي استماع سابق
+    _connectedSubscription?.cancel();
+
+    // الاستماع لحالة اتصال الجهاز بسيرفرات Firebase
+    _connectedSubscription = connectedRef.onValue.listen((event) {
+      final connected = event.snapshot.value as bool? ?? false;
+
+      if (connected) {
+        print('🔵 متصل بـ Firebase');
+
+        // 1. تحديث حالة Online
+        userStatusRef.update({
+          'isOnline': true,
+          'lastSeen': ServerValue.timestamp,
+        });
+
+        // 2. ⭐ الأهم: أخبر Firebase ماذا يفعل إذا انقطع الاتصال فجأة!
+        userStatusRef.onDisconnect().update({
+          'isOnline': false,
+          'lastSeen': ServerValue.timestamp,
+        });
+
+        _saveUserStatusLocally(true);
+
+        // 3. بدء نبضات Ping
+        _startOnlineStatusPing(userId);
+      } else {
+        print('🔴 غير متصل بـ Firebase');
+        _stopOnlineStatusPing();
+        _saveUserStatusLocally(false);
+      }
+    });
+  }
+
+  // ✅ نبضات دورية للتأكد من أن المستخدم لا يزال متصلاً
+  void _startOnlineStatusPing(String userId) {
+    _stopOnlineStatusPing();
+
+    _onlineStatusTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
+      if (_currentUserId != null && isConnected) {
+        try {
+          await db.ref('users/$userId').update({
+            'lastSeen': ServerValue.timestamp,
+            'isOnline': true,
+          });
+
+          // إعادة تسجيل onDisconnect بعد كل تحديث
+          await db.ref('users/$userId').onDisconnect().update({
+            'isOnline': false,
+            'lastSeen': ServerValue.timestamp,
+          });
+
+          print('💓 Ping: تم تحديث حالة المستخدم');
+        } catch (e) {
+          print('❌ خطأ في Ping: $e');
         }
       }
     });
   }
 
-  // ✅ مراقبة دورة حياة التطبيق
-  void _setupLifecycleObserver() {
-    if (WidgetsBinding.instance != null) {
-      WidgetsBinding.instance.addObserver(AppLifecycleObserver(this));
+  void _stopOnlineStatusPing() {
+    _onlineStatusTimer?.cancel();
+    _onlineStatusTimer = null;
+  }
+
+  // ✅ تحويل المستخدم إلى Online
+  Future<void> goOnline(String userId) async {
+    if (userId.isEmpty) return;
+
+    try {
+      await db.ref('users/$userId').update({
+        'isOnline': true,
+        'lastSeen': ServerValue.timestamp,
+      });
+
+      // إعادة تسجيل onDisconnect
+      await db.ref('users/$userId').onDisconnect().update({
+        'isOnline': false,
+        'lastSeen': ServerValue.timestamp,
+      });
+
+      await _saveUserStatusLocally(true);
+      print('✅ تم تحويل المستخدم إلى Online');
+    } catch (e) {
+      print('❌ خطأ في goOnline: $e');
     }
   }
 
-  // ✅ إرسال نبضات (Ping) لتحديث حالة المستخدم بشكل دوري
-  void _startOnlineStatusPing() {
-    _onlineStatusTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
-      if (_currentUserId != null && isConnected) {
-        await db.ref('users').child(_currentUserId!).update({
-          'lastSeen': DateTime.now().millisecondsSinceEpoch,
-          'isOnline': true,
-        });
-        print('💓 Ping: تم تحديث حالة المستخدم');
-      }
-    });
+  // ✅ تحويل المستخدم إلى Offline
+  Future<void> goOffline(String userId) async {
+    if (userId.isEmpty) return;
+
+    try {
+      // إلغاء onDisconnect أولاً
+      await db.ref('users/$userId').onDisconnect().cancel();
+
+      // تحديث الحالة
+      await db.ref('users/$userId').update({
+        'isOnline': false,
+        'lastSeen': ServerValue.timestamp,
+      });
+
+      await _saveUserStatusLocally(false);
+      print('✅ تم تحويل المستخدم إلى Offline');
+    } catch (e) {
+      print('❌ خطأ في goOffline: $e');
+    }
   }
 
-  // ✅ تحديث حالة المستخدم في Firebase
+  // ✅ تحديث حالة المستخدم (للتوافق مع الكود القديم)
   Future<void> updateUserStatus(String userId, bool isOnline) async {
-    try {
-      if (isConnected) {
-        await db.ref('users').child(userId).update({
-          'isOnline': isOnline,
-          'lastSeen': DateTime.now().millisecondsSinceEpoch,
-        });
-        _isUserOnlineInFirebase = isOnline;
-        print('✅ تم تحديث حالة المستخدم في Firebase: $isOnline');
-      }
-
-      // ✅ حفظ الحالة محلياً
-      await saveUserStatusLocally(isOnline);
-    } catch (e) {
-      print('❌ خطأ في تحديث الحالة: $e');
+    if (isOnline) {
+      await goOnline(userId);
+    } else {
+      await goOffline(userId);
     }
   }
 
   // ✅ حفظ حالة المستخدم محلياً
-  Future<void> saveUserStatusLocally(bool isOnline) async {
+  Future<void> _saveUserStatusLocally(bool isOnline) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('isUserOnline', isOnline);
       await prefs.setInt('lastSeen', DateTime.now().millisecondsSinceEpoch);
-      print('✅ تم حفظ الحالة محلياً: $isOnline');
     } catch (e) {
       print('❌ خطأ في حفظ الحالة محلياً: $e');
     }
   }
 
-  // ✅ استعادة الحالة المحلية عند بدء التطبيق
+  // ✅ استعادة الحالة المحلية
   Future<bool> getLocalUserStatus() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -143,8 +234,6 @@ class AuthService {
     try {
       final snapshot = await db.ref('users').orderByChild('phone').equalTo(phone).get();
 
-      print('snapshot data : $snapshot.value');
-
       if (snapshot.exists) {
         final data = snapshot.value as Map<dynamic, dynamic>;
         if (data.isNotEmpty) {
@@ -153,6 +242,7 @@ class AuthService {
           final userData = Map<String, dynamic>.from(entry.value);
 
           final hashedInputPassword = HashService.hashPassword(password);
+
           if (userData['password'] == hashedInputPassword || userData['password'] == password) {
             final user = AppUser(
               id: userId,
@@ -166,10 +256,12 @@ class AuthService {
 
             _currentUserId = userId;
 
-            // ✅ تحديث الحالة في Firebase
-            await updateUserStatus(userId, true);
             await _saveLoginState(true, user);
             await Future.delayed(const Duration(milliseconds: 500));
+
+            // ✅ إعداد Presence بعد تسجيل الدخول
+            setupPresence(userId);
+
             await NotificationService().loginUser(user.phone);
 
             return user;
@@ -190,7 +282,6 @@ class AuthService {
       final response = await db.ref('users').orderByChild('phone').equalTo(phone).get();
 
       if (response.exists) {
-        print('الرقم موجود من قبل، جاري تسجيل الدخول...');
         return await login(phone, password, context);
       }
 
@@ -208,8 +299,12 @@ class AuthService {
 
       await newUserRef.set(newUser.toMap());
       _currentUserId = newUserRef.key;
-      await updateUserStatus(_currentUserId!, true);
+
       await _saveLoginState(true, newUser);
+
+      // ✅ إعداد Presence بعد التسجيل
+      setupPresence(_currentUserId!);
+
       await NotificationService().loginUser(newUser.phone);
 
       return newUser;
@@ -231,9 +326,11 @@ class AuthService {
   }
 
   Future<void> logout() async {
-    _onlineStatusTimer?.cancel();
+    _stopOnlineStatusPing();
+    _connectedSubscription?.cancel();
+
     if (_currentUserId != null) {
-      await updateUserStatus(_currentUserId!, false);
+      await goOffline(_currentUserId!);
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -404,8 +501,8 @@ class AuthService {
   }
 
   void dispose() {
-    _connectionSubscription?.cancel();
-    _onlineStatusTimer?.cancel();
+    _stopOnlineStatusPing();
+    _connectedSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(AppLifecycleObserver(this));
   }
 }
@@ -422,23 +519,25 @@ class AppLifecycleObserver with WidgetsBindingObserver {
 
     switch (state) {
       case AppLifecycleState.resumed:
-      // ✅ التطبيق عاد إلى الواجهة (متصل)
-        if (authService._currentUserId != null) {
-          authService.updateUserStatus(authService._currentUserId!, true);
+      // التطبيق عاد للForeground
+        if (authService._currentUserId != null && authService.isConnected) {
+          authService.goOnline(authService._currentUserId!);
         }
         break;
 
       case AppLifecycleState.paused:
-      case AppLifecycleState.detached:
       case AppLifecycleState.inactive:
-      // ✅ التطبيق في الخلفية أو تم إغلاقه (غير متصل)
+      case AppLifecycleState.hidden:
+      // التطبيق ذهب للBackground
         if (authService._currentUserId != null) {
-          authService.updateUserStatus(authService._currentUserId!, false);
+          authService.goOffline(authService._currentUserId!);
         }
         break;
-      case AppLifecycleState.hidden:
+
+      case AppLifecycleState.detached:
+      // التطبيق تم فصله
         if (authService._currentUserId != null) {
-          authService.updateUserStatus(authService._currentUserId!, false);
+          authService.goOffline(authService._currentUserId!);
         }
         break;
     }
@@ -459,6 +558,7 @@ final cachedUserProvider = FutureProvider<AppUser?>((ref) async {
   final userId = prefs.getString('userId');
   final userName = prefs.getString('userName');
   final isOnline = prefs.getBool('isUserOnline') ?? false;
+  final lastSeen = prefs.getInt('lastSeen') ?? 0;
 
   if (userId != null && userId.isNotEmpty) {
     return AppUser(
@@ -467,7 +567,7 @@ final cachedUserProvider = FutureProvider<AppUser?>((ref) async {
       phone: phone,
       displayName: userName ?? phone,
       isOnline: isOnline,
-      lastSeen: prefs.getInt('lastSeen') ?? DateTime.now().millisecondsSinceEpoch,
+      lastSeen: lastSeen,
     );
   }
 

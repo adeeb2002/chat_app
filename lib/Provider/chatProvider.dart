@@ -4,10 +4,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../model/chat.dart';
-import '../model/Message.dart';
 import '../Notifications/CacheService.dart';
-import '../Notifications/PendingNotificationsService.dart';
-import '../Notifications/notifications.dart';
 
 final firebaseDatabaseProvider = Provider<FirebaseDatabase>((ref) {
   return FirebaseDatabase.instance;

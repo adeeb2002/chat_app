@@ -1,6 +1,5 @@
 // lib/services/notifications/notification_handler.dart
 
-import 'package:ChatApp/Screen/chatScreen.dart';
 import 'package:flutter/material.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import '../model/NotificationType.dart';
@@ -62,9 +61,6 @@ class NotificationHandler {
     print('📱 إشعار وارد في المقدمة: ${event.notification.title}');
 
     try {
-      final additionalData = event.notification.additionalData ?? {};
-      final payload = NotificationPayload.fromOSNotification(additionalData);
-
       // عرض الإشعار داخل التطبيق (اختياري)
       //_showInAppNotification(payload);
 

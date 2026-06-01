@@ -1,8 +1,10 @@
 import 'package:ChatApp/Notifications/notifications.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
+import 'package:ChatApp/Provider/theme_provider.dart';
 import 'package:ChatApp/Screen/editProfileScreen.dart';
 import 'package:ChatApp/Screen/login.dart';
 import 'package:ChatApp/Animation/RouteAnimation.dart';
+import 'package:ChatApp/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -43,7 +45,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(value ? 'تم تشغيل الإشعارات' : 'تم إيقاف الإشعارات'),
-          backgroundColor: value ? Colors.green : Colors.orange,
+          backgroundColor: value ? AppTheme.successColor : AppTheme.warningColor,
           duration: const Duration(seconds: 2),
         ),
       );
@@ -51,6 +53,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   void _showAboutDialog() {
+    final theme = Theme.of(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -60,10 +63,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFF075E54).withOpacity(0.1),
+                color: theme.colorScheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.chat, color: Color(0xFF075E54)),
+              child: Icon(Icons.chat, color: theme.colorScheme.primary),
             ),
             const SizedBox(width: 12),
             const Text('ChatApp'),
@@ -73,16 +76,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('الإصدار 1.0.0', style: TextStyle(color: Colors.grey[600])),
+            Text('الإصدار 1.0.0', style: theme.textTheme.bodySmall),
             const SizedBox(height: 12),
             Text(
               'تطبيق محادثة فوري مبني باستخدام Flutter و Firebase.',
-              style: TextStyle(fontSize: 14, color: Colors.grey[800]),
+              style: TextStyle(fontSize: 14, color: theme.textTheme.bodyLarge?.color),
             ),
             const SizedBox(height: 12),
             Text(
               'المطور: Adeeb',
-              style: TextStyle(color: Colors.grey[600], fontWeight: FontWeight.bold),
+              style: TextStyle(color: theme.textTheme.bodySmall?.color, fontWeight: FontWeight.bold),
             ),
           ],
         ),
@@ -109,7 +112,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor),
             child: const Text('تسجيل خروج', style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -142,22 +145,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final currentUser = ref.watch(appUserDataProvider);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text('الإعدادات'),
         centerTitle: true,
-        backgroundColor: const Color(0xFF075E54),
-        foregroundColor: Colors.white,
-        elevation: 0,
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           // ✅ الملف الشخصي
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: InkWell(
               borderRadius: BorderRadius.circular(16),
               onTap: () async {
@@ -172,7 +172,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   children: [
                     CircleAvatar(
                       radius: 30,
-                      backgroundColor: const Color(0xFF075E54).withOpacity(0.1),
+                      backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
                       backgroundImage: currentUser?.imageUrl != null && currentUser!.imageUrl!.isNotEmpty
                           ? NetworkImage(currentUser.imageUrl!)
                           : null,
@@ -181,10 +181,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               currentUser?.displayName.isNotEmpty == true
                                   ? currentUser!.displayName[0].toUpperCase()
                                   : 'U',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF075E54),
+                                color: theme.colorScheme.primary,
                               ),
                             )
                           : null,
@@ -196,18 +196,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         children: [
                           Text(
                             currentUser?.displayName ?? 'مستخدم',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: theme.textTheme.titleMedium,
                           ),
                           const SizedBox(height: 4),
                           Text(
                             currentUser?.phone ?? '',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[600],
-                            ),
+                            style: theme.textTheme.bodySmall,
                           ),
                         ],
                       ),
@@ -222,20 +216,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           // ✅ الإعدادات الأساسية
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: Column(
               children: [
                 ListTile(
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF075E54).withOpacity(0.1),
+                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.person, color: Color(0xFF075E54), size: 22),
+                    child: Icon(Icons.person, color: theme.colorScheme.primary, size: 22),
                   ),
                   title: const Text('تعديل الملف الشخصي', style: TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text('الاسم، الصورة، البريد الإلكتروني', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  subtitle: Text('الاسم، الصورة، البريد الإلكتروني', style: theme.textTheme.bodySmall),
                   trailing: const Icon(Icons.chevron_left, color: Colors.grey),
                   onTap: () async {
                     await Navigator.push(
@@ -249,20 +242,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF075E54).withOpacity(0.1),
+                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.notifications, color: Color(0xFF075E54), size: 22),
+                    child: Icon(Icons.notifications, color: theme.colorScheme.primary, size: 22),
                   ),
                   title: const Text('الإشعارات', style: TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(
                     _notificationsEnabled ? 'تشغيل' : 'إيقاف',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    style: theme.textTheme.bodySmall,
                   ),
                   trailing: Switch(
                     value: _notificationsEnabled,
                     onChanged: _toggleNotifications,
-                    activeColor: const Color(0xFF075E54),
                   ),
                 ),
                 const Divider(height: 1, indent: 60),
@@ -270,21 +262,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF075E54).withOpacity(0.1),
+                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.dark_mode, color: Color(0xFF075E54), size: 22),
+                    child: Icon(Icons.dark_mode, color: theme.colorScheme.primary, size: 22),
                   ),
                   title: const Text('الوضع المظلم', style: TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text('قريباً', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  subtitle: Text(
+                    isDark ? 'مفعل' : 'غير مفعل',
+                    style: theme.textTheme.bodySmall,
+                  ),
                   trailing: Switch(
-                    value: false,
-                    onChanged: (_) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('قريباً إن شاء الله')),
-                      );
-                    },
-                    activeColor: const Color(0xFF075E54),
+                    value: isDark,
+                    onChanged: (_) => ref.read(themeModeProvider.notifier).toggle(),
                   ),
                 ),
               ],
@@ -294,20 +284,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           // ✅ أقسام إضافية
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: Column(
               children: [
                 ListTile(
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF075E54).withOpacity(0.1),
+                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.share, color: Color(0xFF075E54), size: 22),
+                    child: Icon(Icons.share, color: theme.colorScheme.primary, size: 22),
                   ),
                   title: const Text('مشاركة التطبيق', style: TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text('ادع أصدقائك لتجربة التطبيق', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  subtitle: Text('ادع أصدقائك لتجربة التطبيق', style: theme.textTheme.bodySmall),
                   trailing: const Icon(Icons.chevron_left, color: Colors.grey),
                   onTap: () async {
                     final uri = Uri.parse('https://github.com/adeeb2002/chat_app');
@@ -321,13 +310,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF075E54).withOpacity(0.1),
+                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.info, color: Color(0xFF075E54), size: 22),
+                    child: Icon(Icons.info, color: theme.colorScheme.primary, size: 22),
                   ),
                   title: const Text('حول التطبيق', style: TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text('الإصدار 1.0.0', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  subtitle: Text('الإصدار 1.0.0', style: theme.textTheme.bodySmall),
                   trailing: const Icon(Icons.chevron_left, color: Colors.grey),
                   onTap: _showAboutDialog,
                 ),
@@ -338,20 +327,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           // ✅ تسجيل الخروج
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
+                  color: AppTheme.errorColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.logout, color: Colors.red),
+                child: const Icon(Icons.logout, color: AppTheme.errorColor),
               ),
               title: Text(
                 'تسجيل الخروج',
                 style: TextStyle(
-                  color: Colors.red[700],
+                  color: isDark ? Colors.red.shade300 : Colors.red[700],
                   fontWeight: FontWeight.bold,
                 ),
               ),

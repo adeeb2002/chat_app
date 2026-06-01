@@ -40,7 +40,8 @@ class NotificationPayload {
       if (senderId != null) 'senderId': senderId,
       if (messageId != null) 'messageId': messageId,
       if (groupId != null) 'groupId': groupId,
-      if (extraData != null) ...extraData!,
+      // ignore: use_null_aware_elements
+      if (extraData case final data?) ...data,
     };
   }
 

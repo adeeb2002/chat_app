@@ -1,10 +1,7 @@
 import 'dart:async';
 
-import 'package:ChatApp/Provider/userProvide.dart';
-import 'package:ChatApp/Screen/SplashScreen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:ChatApp/Screen/home.dart';
-import 'package:ChatApp/Screen/login.dart';
+import 'package:ChatApp/Screen/SplashScreen.dart';
 import 'package:ChatApp/hiveModle/HiveMessage.dart';
 import 'package:ChatApp/service/firebase_options.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -18,6 +15,7 @@ import 'Notifications/NotificationHandler.dart';
 import 'Notifications/PendingNotificationsService.dart';
 import 'Notifications/notifications.dart';
 import 'hiveModle/HiveChat.dart';
+import 'Provider/theme_provider.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
@@ -74,16 +72,19 @@ void main() async {
   runApp(const ProviderScope(child: MyApp()));
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends ConsumerWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
       navigatorKey: NotificationHandler().navigatorKey,
       title: 'ChatApp',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: themeMode,
       home: const SplashScreen(),
     );
   }

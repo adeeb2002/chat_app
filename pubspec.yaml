@@ -36,13 +36,12 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_riverpod: ^2.6.1
   http: ^1.6.0
-  firebase_core: ^4.7.0
-  firebase_database: ^12.3.0
-  firebase_auth: ^5.5.2
+  firebase_core: ^4.9.0
+  firebase_database: ^12.4.1
+  firebase_auth: ^6.5.1
   shared_preferences: ^2.5.5
   intl: ^0.18.1
   flutter_dotenv: ^5.2.1
-  internet_connection_checker_plus: ^3.0.1
   hive: ^2.2.3  # 🌟 بديل حزمة hive الأصلية
   hive_flutter: ^1.1.0 # 🌟 بديل حزمة hive_flutter
   image_picker: ^1.0.5
@@ -63,6 +62,8 @@ dependencies:
 
   connectivity_plus: ^6.0.0
   crypto: ^3.0.3
+  internet_connection_checker_plus: ^3.0.0
+
 
 
 

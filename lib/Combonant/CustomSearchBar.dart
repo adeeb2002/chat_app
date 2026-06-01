@@ -50,7 +50,7 @@ class _CustomSearchBarState extends State<CustomSearchBar> {
         borderRadius: BorderRadius.circular(15), // حواف دائرية ناعمة وعصرية
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.01), // ظل خفيف جداً لإعطاء عمق
+            color: Colors.black.withValues(alpha: 0.01), // ظل خفيف جداً لإعطاء عمق
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),

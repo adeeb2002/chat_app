@@ -2,7 +2,7 @@
 
 import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'notifications.dart';
 
 class PendingNotificationsService {
@@ -12,7 +12,7 @@ class PendingNotificationsService {
   PendingNotificationsService._internal();
 
   final FirebaseDatabase _db = FirebaseDatabase.instance;
-  StreamSubscription? _connectionSubscription;
+  StreamSubscription<List<ConnectivityResult>>? _connectionSubscription;
   bool _isProcessing = false;
 
   // ✅ مجموعة لتتبع الإشعارات الجاري معالجتها (لمنع التكرار)
@@ -21,8 +21,9 @@ class PendingNotificationsService {
   Future<void> startMonitoring() async{
     print('🔍 بدء مراقبة الإشعارات المعلقة...');
 
-    _connectionSubscription = InternetConnection().onStatusChange.listen((status) {
-      if (status == InternetStatus.connected) {
+    _connectionSubscription = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> result) {
+      final hasConnection = result.contains(ConnectivityResult.mobile) || result.contains(ConnectivityResult.wifi);
+      if (hasConnection) {
         print('🌐 عاد الاتصال! محاولة إرسال الإشعارات المعلقة...');
         _processPendingNotifications();
       }

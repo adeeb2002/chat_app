@@ -70,7 +70,7 @@ class HiveMessage {
       timestamp: message.timestamp,
       isRead: message.isRead,
       isDeleted: message.isDeleted,
-      isSynced: message.isSynced ?? true,
+      isSynced: message.isSynced,
       editedAt: message.editedAt,
 
     );
