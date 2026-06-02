@@ -3,10 +3,13 @@ import 'package:ChatApp/Provider/network_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../Notifications/notifications.dart';
 import '../model/user.dart';
 import '../service/hash_service.dart';
+import '../service/linkedin_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 // Providers
 final appUserDataProvider = StateProvider<AppUser?>((ref) => null);
@@ -14,6 +17,7 @@ final appUserPhoneProvider = StateProvider<String?>((ref) => null);
 final isLoadingProvider = StateProvider<bool>((ref) => false);
 final isLoginProvider = StateProvider<bool>((ref) => false);
 final currentReceiverProvider = StateProvider<AppUser?>((ref) => null);
+
 
 final authServiceProvider = Provider<AuthService>((ref) {
   final db = FirebaseDatabase.instance;
@@ -61,8 +65,13 @@ class AuthService {
   bool isConnected = true;
   String? _currentUserId;
 
+  final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
+
   Timer? _onlineStatusTimer;
   StreamSubscription? _connectedSubscription;
+  String? _changePhoneVerificationId;
+
 
   AuthService(this.db) {
     _setupLifecycleObserver();
@@ -71,6 +80,20 @@ class AuthService {
   // ✅ مراقبة دورة حياة التطبيق
   void _setupLifecycleObserver() {
     WidgetsBinding.instance.addObserver(AppLifecycleObserver(this));
+  }
+
+  Future<User?> firebaseAuthLoginWithEmail(
+      String email, String password) async {
+    try {
+      final credential = await _firebaseAuth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      return credential.user;
+    } catch (e) {
+      print('Firebase Auth Error: $e');
+      return null;
+    }
   }
 
   // ✅ إعداد Firebase Presence مع onDisconnect
@@ -221,95 +244,321 @@ class AuthService {
   }
 
   Stream<AppUser?> watchCurrentUser() {
-    return Stream.periodic(const Duration(seconds: 3), (_) async {
-      final isLoggedIn = await checkLogin();
-      if (isLoggedIn && _currentUserId != null) {
-        return await getUserById(_currentUserId!);
-      }
-      return null;
-    }).asyncMap((event) => event);
-  }
+    return _firebaseAuth.authStateChanges().asyncMap((firebaseUser) async {
+      if (firebaseUser == null) return null;
 
-  Future<AppUser?> login(String phone, String password, BuildContext context) async {
-    try {
-      final snapshot = await db.ref('users').orderByChild('phone').equalTo(phone).get();
+      final snapshot =
+      await db.ref('users').child(firebaseUser.uid).get();
 
       if (snapshot.exists) {
-        final data = snapshot.value as Map<dynamic, dynamic>;
-        if (data.isNotEmpty) {
-          final entry = data.entries.first;
-          final userId = entry.key.toString();
-          final userData = Map<String, dynamic>.from(entry.value);
-
-          final hashedInputPassword = HashService.hashPassword(password);
-
-          if (userData['password'] == hashedInputPassword || userData['password'] == password) {
-            final user = AppUser(
-              id: userId,
-              phone: phone,
-              email: userData['email'] ?? 'example@gmail.com',
-              displayName: userData['displayName'] ?? phone,
-              imageUrl: userData['imageUrl'],
-              isOnline: true,
-              lastSeen: DateTime.now().millisecondsSinceEpoch,
-            );
-
-            _currentUserId = userId;
-
-            await _saveLoginState(true, user);
-            await Future.delayed(const Duration(milliseconds: 500));
-
-            // ✅ إعداد Presence بعد تسجيل الدخول
-            setupPresence(userId);
-
-            await NotificationService().loginUser(user.phone);
-
-            return user;
-          } else {
-            throw Exception('كلمة المرور غير صحيحة');
-          }
-        }
+        final data =
+        Map<String, dynamic>.from(snapshot.value as Map);
+        return AppUser.fromMap(firebaseUser.uid, data);
       }
-      return await register(phone, password, context);
+
+      return null;
+    });
+  }
+
+  Future<AppUser?> loginWithPhoneAsKey(
+     String phone,
+     String firebasePassword,
+  ) async {
+    try {
+      // ✅ 1. جلب بيانات المستخدم باستخدام phone مباشرة
+      final snapshot = await db.ref('users').child(phone).get();
+
+      if (!snapshot.exists) {
+        throw Exception("بيانات غير صحيحة");
+      }
+
+      final userData =
+      Map<String, dynamic>.from(snapshot.value as Map);
+
+      final email = userData['email'];
+
+      // ✅ 2. تسجيل دخول Firebase
+      final credential =
+      await _firebaseAuth.signInWithEmailAndPassword(
+        email: email,
+        password: firebasePassword,
+      );
+
+      if (credential.user == null) {
+        throw Exception("فشل تسجيل الدخول");
+      }
+
+      // ✅ 3. تأكد أن UID مطابق
+      if (credential.user!.uid != userData['uid']) {
+        throw Exception("خطأ في تطابق الحساب");
+      }
+
+      final user = AppUser.fromMap(phone, userData);
+
+      _currentUserId = phone;
+
+      await _saveLoginState(true, user);
+      setupPresence(phone);
+
+      return user;
     } catch (e) {
-      print('❌ خطأ في تسجيل الدخول: $e');
+      print("❌ Login Error: $e");
+      return null;
+    }
+  }
+  Future<AppUser?> registerWithPhoneAsKey(
+     String phone,
+     String email,
+     String firebasePassword,
+     String displayName,
+  ) async {
+    try {
+      // ✅ إنشاء مستخدم Firebase
+      final credential =
+      await _firebaseAuth.createUserWithEmailAndPassword(
+        email: email,
+        password: firebasePassword,
+      );
+
+      final uid = credential.user!.uid;
+
+      // ✅ تخزين في DB باستخدام phone كمفتاح
+      await db.ref('users').child(phone).set({
+        'uid': uid,
+        'email': email,
+        'displayName': displayName,
+        'phone': phone,
+        'phoneVerified': true,
+        'isOnline': true,
+        'lastSeen': ServerValue.timestamp,
+        'createdAt': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      final user = AppUser(
+        id: phone, // ✅ المفتاح أصبح phone
+        email: email,
+        phone: phone,
+        displayName: displayName,
+        isOnline: true,
+        lastSeen: DateTime.now().millisecondsSinceEpoch,
+      );
+
+      _currentUserId = phone;
+
+      await _saveLoginState(true, user);
+      setupPresence(phone);
+
+      return user;
+    } catch (e) {
+      print("❌ Register Error: $e");
       return null;
     }
   }
 
-  Future<AppUser?> register(String phone, String password, BuildContext context) async {
+  Future<AppUser?> loginWithGoogle() async {
     try {
-      final response = await db.ref('users').orderByChild('phone').equalTo(phone).get();
+      // ✅ 1. اختيار حساب Google
+      final GoogleSignInAccount? googleUser =
+      await _googleSignIn.signIn();
 
-      if (response.exists) {
-        return await login(phone, password, context);
+      if (googleUser == null) return null;
+
+      final GoogleSignInAuthentication googleAuth =
+      await googleUser.authentication;
+
+      // ✅ 2. إنشاء Credential
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      // ✅ 3. تسجيل الدخول في FirebaseAuth
+      final userCredential =
+      await _firebaseAuth.signInWithCredential(credential);
+
+      final firebaseUser = userCredential.user;
+      if (firebaseUser == null) return null;
+
+      final uid = firebaseUser.uid;
+
+      // ✅ 4. تحقق إذا المستخدم موجود في Realtime Database
+      final snapshot = await db.ref('users').child(uid).get();
+
+      if (snapshot.exists) {
+        final data =
+        Map<String, dynamic>.from(snapshot.value as Map);
+
+        final user = AppUser.fromMap(uid, data);
+
+        _currentUserId = uid;
+        await _saveLoginState(true, user);
+        setupPresence(uid);
+
+        return user;
       }
 
+      // ✅ 5. إنشاء مستخدم جديد
+      final newUser = AppUser(
+        id: uid,
+        email: firebaseUser.email,
+        phone: '',
+        displayName: firebaseUser.displayName ?? 'Google User',
+        imageUrl: firebaseUser.photoURL,
+        isOnline: true,
+        lastSeen: DateTime.now().millisecondsSinceEpoch,
+      );
+
+      await db.ref('users').child(uid).set({
+        ...newUser.toMap(),
+        'provider': 'google',
+        'createdAt': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      _currentUserId = uid;
+      await _saveLoginState(true, newUser);
+      setupPresence(uid);
+
+      return newUser;
+    } catch (e) {
+      print("❌ Google Login Error: $e");
+      return null;
+    }
+  }
+
+  Future<void> sendChangePhoneOTP(String newPhone) async {
+    await _firebaseAuth.verifyPhoneNumber(
+      phoneNumber: newPhone,
+      verificationCompleted: (PhoneAuthCredential credential) async {
+        await _firebaseAuth.currentUser!
+            .linkWithCredential(credential);
+      },
+      verificationFailed: (FirebaseAuthException e) {
+        print("❌ Phone verification failed: $e");
+      },
+      codeSent: (String verificationId, int? resendToken) {
+        _changePhoneVerificationId = verificationId;
+        print("✅ OTP Sent for phone change");
+      },
+      codeAutoRetrievalTimeout: (String verificationId) {
+        _changePhoneVerificationId = verificationId;
+      },
+    );
+  }
+
+  Future<bool> verifyAndChangePhone({
+    required String oldPhone,
+    required String newPhone,
+    required String smsCode,
+  }) async {
+    try {
+      // ✅ 1. تأكد أن الرقم الجديد غير مستخدم
+      final newPhoneSnapshot =
+      await db.ref('users').child(newPhone).get();
+
+      if (newPhoneSnapshot.exists) {
+        throw Exception("الرقم الجديد مستخدم مسبقاً");
+      }
+
+      // ✅ 2. تحقق OTP
+      final credential = PhoneAuthProvider.credential(
+        verificationId: _changePhoneVerificationId!,
+        smsCode: smsCode,
+      );
+
+      await _firebaseAuth.currentUser!
+          .linkWithCredential(credential);
+
+      // ✅ 3. جلب بيانات المستخدم القديمة
+      final oldSnapshot =
+      await db.ref('users').child(oldPhone).get();
+
+      if (!oldSnapshot.exists) {
+        throw Exception("الحساب غير موجود");
+      }
+
+      final userData =
+      Map<String, dynamic>.from(oldSnapshot.value as Map);
+
+      // ✅ 4. نقل البيانات إلى الرقم الجديد
+      await db.ref('users').child(newPhone).set({
+        ...userData,
+        'phone': newPhone,
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      // ✅ 5. حذف الحساب القديم
+      await db.ref('users').child(oldPhone).remove();
+
+      // ✅ 6. تحديث Presence
+      _currentUserId = newPhone;
+      setupPresence(newPhone);
+
+      print("✅ تم تغيير رقم الهاتف بأمان");
+
+      return true;
+    } catch (e) {
+      print("❌ Change Phone Error: $e");
+      return false;
+    }
+  }
+
+  Future<AppUser?> loginWithLinkedIn(BuildContext context) async {
+    try {
+      final linkedInData = await LinkedInService().login();
+      if (linkedInData == null) return null;
+
+      final linkedinId = linkedInData['sub'];
+      final email = linkedInData['email'];
+      final name = linkedInData['name'];
+      final image = linkedInData['picture'];
+
+      // هل المستخدم موجود؟
+      final snapshot = await db
+          .ref('users')
+          .orderByChild('linkedinId')
+          .equalTo(linkedinId)
+          .get();
+
+      if (snapshot.exists) {
+        final data = snapshot.value as Map;
+        final entry = data.entries.first;
+        final userId = entry.key;
+
+        final user = AppUser.fromMap(userId, Map.from(entry.value));
+
+        _currentUserId = userId;
+        await _saveLoginState(true, user);
+        setupPresence(userId);
+
+        return user;
+      }
+
+      // إنشاء مستخدم جديد
       final newUserRef = db.ref('users').push();
 
       final newUser = AppUser(
         id: newUserRef.key,
-        email: 'example@gmail.com',
-        phone: phone,
-        displayName: phone,
+        phone: '',
+        email: email,
+        displayName: name,
+        imageUrl: image,
         isOnline: true,
         lastSeen: DateTime.now().millisecondsSinceEpoch,
-        password: HashService.hashPassword(password),
       );
 
-      await newUserRef.set(newUser.toMap());
+      await newUserRef.set({
+        ...newUser.toMap(),
+        'linkedinId': linkedinId,
+        'provider': 'linkedin',
+      });
+
       _currentUserId = newUserRef.key;
-
       await _saveLoginState(true, newUser);
-
-      // ✅ إعداد Presence بعد التسجيل
       setupPresence(_currentUserId!);
-
-      await NotificationService().loginUser(newUser.phone);
 
       return newUser;
     } catch (e) {
-      print('❌ خطأ في التسجيل: $e');
+      print('LinkedIn Auth Error: $e');
       return null;
     }
   }
@@ -333,35 +582,21 @@ class AuthService {
       await goOffline(_currentUserId!);
     }
 
+    await _firebaseAuth.signOut(); // ✅ مهم جداً
+
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('phone');
-    await prefs.remove('isLogin');
-    await prefs.remove('userEmail');
-    await prefs.remove('userId');
-    await prefs.remove('userName');
+    await prefs.clear();
 
     _currentUserId = null;
+
     await NotificationService().logoutUser();
 
     print('✅ تم تسجيل الخروج بنجاح');
   }
 
   Future<bool> checkLogin() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final isLogin = prefs.getBool('isLogin') ?? false;
-
-      if (isLogin) {
-        final userPhone = prefs.getString('phone');
-        if (userPhone != null && userPhone.isNotEmpty) {
-          return true;
-        }
-      }
-      return false;
-    } catch (e) {
-      print('❌ خطأ في التحقق من تسجيل الدخول: $e');
-      return false;
-    }
+    final user = _firebaseAuth.currentUser;
+    return user != null;
   }
 
   Future<AppUser?> getUserByPhone(String? phone) async {

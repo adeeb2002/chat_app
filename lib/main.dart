@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:ChatApp/Screen/SplashScreen.dart';
 import 'package:ChatApp/hiveModle/HiveMessage.dart';
@@ -16,47 +15,80 @@ import 'Notifications/PendingNotificationsService.dart';
 import 'Notifications/notifications.dart';
 import 'hiveModle/HiveChat.dart';
 import 'Provider/theme_provider.dart';
+import 'service/NetworkOptimizationService.dart'; // ✅ NEW
 import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  print('🚀 بدء تهيئة التطبيق...');
+
   // ✅ 0. تحميل المتغيرات البيئية
-  await dotenv.load(fileName: 'data.env');
+  try {
+    await dotenv.load(fileName: 'data.env');
+    print('✅ تم تحميل ملف .env');
+  } catch (e) {
+    print('❌ خطأ في تحميل .env: $e');
+  }
 
-  // ✅ 1. تهيئة Hive
-  await Hive.initFlutter();
-  Hive.registerAdapter(HiveChatAdapter());
-  Hive.registerAdapter(HiveMessageAdapter());
-  await Hive.openBox<HiveChat>(AdvancedCacheService.chatBoxName);
-  await Hive.openBox(AdvancedCacheService.metadataBoxName);
+  // ✅ 1. تهيئة Hive (لا تحتاج إنترنت)
+  try {
+    await Hive.initFlutter();
+    Hive.registerAdapter(HiveChatAdapter());
+    Hive.registerAdapter(HiveMessageAdapter());
+    await Hive.openBox<HiveChat>(AdvancedCacheService.chatBoxName);
+    await Hive.openBox(AdvancedCacheService.metadataBoxName);
+    print('✅ تم تهيئة Hive بنجاح');
+  } catch (e) {
+    print('❌ خطأ في تهيئة Hive: $e');
+  }
 
-  // ✅ 2. تهيئة Firebase
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  // ✅ 2. تهيئة خدمة تحسين الشبكة (قبل Firebase)
+  try {
+    await NetworkOptimizationService().initialize();
+    print('✅ تم تهيئة NetworkOptimizationService');
+  } catch (e) {
+    print('❌ خطأ في NetworkOptimizationService: $e');
+  }
 
-  final database = FirebaseDatabase.instance;
-  database.setPersistenceEnabled(true);
-  database.setPersistenceCacheSizeBytes(100000000);
-  database.ref('chats').keepSynced(true);
+  // ✅ 3. تهيئة Firebase (مع معالجة الأخطاء)
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
 
-  // ✅ 3. تهيئة الإشعارات (مع معالجة الأخطاء)
+    final database = FirebaseDatabase.instance;
+    database.setPersistenceEnabled(true);
+    database.setPersistenceCacheSizeBytes(100000000);
+
+    // ✅ تقليل عدد الـ sync في حالة الاتصال البطيء
+    if (!NetworkOptimizationService().isSlowConnection) {
+      database.ref('chats').keepSynced(true);
+    }
+
+    print('✅ تم تهيئة Firebase بنجاح');
+  } catch (e) {
+    print('⚠️ Firebase لم يُهيأ: $e');
+    print('✅ سيستمر التطبيق في الوضع Offline');
+  }
+
+  // ✅ 4. تهيئة الإشعارات (مع معالجة الأخطاء)
   try {
     await NotificationService().initialize();
     print('✅ تم تهيئة OneSignal بنجاح');
   } catch (e) {
-    print('❌ خطأ في تهيئة OneSignal: $e');
+    print('⚠️ خطأ في تهيئة OneSignal: $e');
   }
 
   try {
     NotificationHandler().initialize();
     print('✅ تم تهيئة معالج الإشعارات بنجاح');
   } catch (e) {
-    print('❌ خطأ في معالج الإشعارات: $e');
+    print('⚠️ خطأ في معالج الإشعارات: $e');
   }
 
-  // ✅ 4. بدء مراقبة الإشعارات المعلقة
+  // ✅ 5. بدء مراقبة الإشعارات المعلقة
   try {
     PendingNotificationsService().startMonitoring();
     Timer.periodic(const Duration(days: 1), (timer) {
@@ -64,10 +96,11 @@ void main() async {
     });
     print('✅ تم بدء مراقبة الإشعارات المعلقة');
   } catch (e) {
-    print('❌ خطأ في مراقبة الإشعارات: $e');
+    print('⚠️ خطأ في مراقبة الإشعارات: $e');
   }
 
   print('✅ تم تهيئة التطبيق بنجاح');
+  print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   runApp(const ProviderScope(child: MyApp()));
 }

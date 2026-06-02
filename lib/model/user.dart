@@ -7,6 +7,7 @@ class AppUser {
   final bool isOnline;
   final int lastSeen;
   final String? password;
+  final String? linkedinId;
 
   AppUser({
     this.id,
@@ -17,6 +18,7 @@ class AppUser {
     this.isOnline = false,
     this.lastSeen = 0,
     this.password,
+    this.linkedinId
   });
 
   Map<String, dynamic> toMap() {
@@ -28,6 +30,7 @@ class AppUser {
       'isOnline': isOnline,
       'lastSeen': lastSeen,
       'password': password,
+      'linkedinId' :linkedinId
     };
   }
 
@@ -40,6 +43,7 @@ class AppUser {
     int? lastSeen,
     String? imageUrl,
     String? password,
+    String? linkedinId
   }) {
     return AppUser(
       id: id ?? this.id,
@@ -50,6 +54,7 @@ class AppUser {
       lastSeen: lastSeen ?? this.lastSeen,
       imageUrl: imageUrl ?? this.imageUrl,
       password: password ?? this.password,
+      linkedinId: linkedinId ?? this.linkedinId
     );
   }
 
@@ -63,6 +68,7 @@ class AppUser {
       isOnline: map['isOnline'] ?? false,
       lastSeen: map['lastSeen'] is int ? map['lastSeen'] : 0,
       password: map['password'] ?? '',
+      linkedinId: map['linkedinId'] ?? ''
     );
   }
 

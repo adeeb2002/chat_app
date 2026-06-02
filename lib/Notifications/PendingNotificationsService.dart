@@ -63,6 +63,32 @@ class PendingNotificationsService {
     }
   }
 
+  Future<void> clearPendingNotificationsForMe(String myPhone, String chatId) async {
+    try {
+      // البحث عن الإشعارات التي موجهة لي (receiverPhone) وفي هذه المحادثة (chatId)
+      final snapshot = await _db
+          .ref('pendingNotifications')
+          .orderByChild('receiverPhone')
+          .equalTo(myPhone)
+          .get();
+
+      if (snapshot.exists) {
+        final notifications = snapshot.value as Map<dynamic, dynamic>;
+
+        for (var entry in notifications.entries) {
+          final data = Map<String, dynamic>.from(entry.value);
+          // التأكد أن الإشعار يخص هذه المحادثة تحديداً
+          if (data['chatId'] == chatId) {
+            await _db.ref('pendingNotifications').child(entry.key).remove();
+          }
+        }
+        print('🧹 تم تنظيف الإشعارات المعلقة للمستلم بنجاح');
+      }
+    } catch (e) {
+      print('❌ خطأ في تنظيف إشعارات المستلم: $e');
+    }
+  }
+
   Future<void> _processPendingNotifications() async {
     // ✅ منع المعالجة المتزامنة
     if (_isProcessing) {

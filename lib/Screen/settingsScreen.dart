@@ -2,7 +2,7 @@ import 'package:ChatApp/Notifications/notifications.dart';
 import 'package:ChatApp/Provider/userProvide.dart';
 import 'package:ChatApp/Provider/theme_provider.dart';
 import 'package:ChatApp/Screen/editProfileScreen.dart';
-import 'package:ChatApp/Screen/login.dart';
+import 'package:ChatApp/Screen/loginScreen.dart';
 import 'package:ChatApp/Animation/RouteAnimation.dart';
 import 'package:ChatApp/theme/app_theme.dart';
 import 'package:flutter/material.dart';
@@ -160,12 +160,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Card(
             child: InkWell(
               borderRadius: BorderRadius.circular(16),
+              /*
               onTap: () async {
                 await Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const EditProfileScreen()),
                 );
               },
+
+               */
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Row(
@@ -206,7 +209,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ],
                       ),
                     ),
-                    const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                    //const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
                   ],
                 ),
               ),

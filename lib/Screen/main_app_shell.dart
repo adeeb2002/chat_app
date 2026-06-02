@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'home.dart';
+import 'homeScreen.dart';
 import 'stories_screen.dart';
 import 'settingsScreen.dart';
 

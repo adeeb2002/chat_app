@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../Notifications/PendingNotificationsService.dart';
 import '../Notifications/notifications.dart';
 import '../Provider/messageProvder.dart';
 import '../model/Message.dart';
@@ -68,6 +69,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
     _loadPendingMessages();
     _setupConnectivityListener();
+
+    // تنظيف الإشعارات المعلقة الموجهة لي في هذه المحادثة
+    _clearMyPendingNotifications();
+  }
+
+  Future<void> _clearMyPendingNotifications() async {
+    final currentUser = ref.read(appUserDataProvider);
+    if (currentUser != null) {
+      await PendingNotificationsService().clearPendingNotificationsForMe(
+          currentUser.phone,
+          widget.chat.id
+      );
+    }
   }
 
   void _setupConnectivityListener() {
@@ -207,15 +221,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         currentUser.phone,
         typing,
       );
-    }
-  }
-
-  void _markMessageAsSent(String messageId) {
-    if (mounted) {
-      setState(() {
-        _sendingMessages.remove(messageId);
-        _failedMessages.remove(messageId);
-      });
     }
   }
 
@@ -2064,53 +2069,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           ),
         );
       },
-    );
-  }
-
-  void _showImagePickerOptions(
-      BuildContext context,
-      Function setModalState,
-      Function(String) onImageUploaded,
-      Function onUploadStart,
-      Function onUploadEnd,
-      ) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Material(
-              color: Colors.transparent,
-              child: ListTile(
-                leading: const Icon(Icons.photo_library, color: Colors.green),
-                title: const Text('اختيار من المعرض', style: TextStyle(fontWeight: FontWeight.w500)),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await _pickAndUploadImageForProfile(false, setModalState, onImageUploaded, onUploadStart, onUploadEnd);
-                },
-              ),
-            ),
-            const Divider(height: 1),
-            Material(
-              color: Colors.transparent,
-              child: ListTile(
-                leading: const Icon(Icons.camera_alt, color: Colors.green),
-                title: const Text('التقاط صورة', style: TextStyle(fontWeight: FontWeight.w500)),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await _pickAndUploadImageForProfile(true, setModalState, onImageUploaded, onUploadStart, onUploadEnd);
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
     );
   }
 

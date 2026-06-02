@@ -8,6 +8,7 @@ import '../Notifications/CacheService.dart';
 import '../Notifications/PendingNotificationsService.dart';
 import '../Notifications/notifications.dart';
 import '../model/Message.dart';
+import '../service/NetworkOptimizationService.dart';
 
 final messageDatabaseProvider = Provider<FirebaseDatabase>((ref) {
   return FirebaseDatabase.instance;
@@ -76,55 +77,60 @@ class MessageService {
       throw Exception('بيانات الرسالة غير صالحة');
     }
 
+    final networkService = NetworkOptimizationService();
+
     try {
       final chatRef = db.ref('chats').child(message.chatId).child('messages');
       final newMessageRef = chatRef.child(messageId);
 
-      // ✅ استخدام toJson() بدلاً من toMap() لضمان حفظ type كـ int (0, 1, 2...)
       final messageData = message.toJson();
       messageData['id'] = messageId;
 
-      await newMessageRef.set(messageData);
+      // ✅ استخدام NetworkOptimizationService
+      await networkService.executeRequest(
+            () => newMessageRef.set(messageData),
+        debugName: 'sendMessage_$messageId',
+        priority: true, // أولوية عالية للإرسال
+      );
 
-      // ✅ تحديث المحادثة باستخدام Transaction
+      // ✅ تحديث المحادثة
       final chatMainRef = db.ref('chats').child(message.chatId);
       final receiverCleanKey = message.resevUser.replaceAll('+', 'p');
 
-      await chatMainRef.runTransaction((Object? chatData) {
-        if (chatData == null) return Transaction.abort();
+      await networkService.executeRequest(
+            () => chatMainRef.runTransaction((Object? chatData) {
+          if (chatData == null) return Transaction.abort();
 
-        final Map<String, dynamic> chatMap = Map<String, dynamic>.from(chatData as Map);
+          final Map<String, dynamic> chatMap = Map<String, dynamic>.from(chatData as Map);
 
-        // ✅ إصلاح: إذا كانت الرسالة صورة، اعرض "📷 صورة" بدلاً من الرابط في قائمة المحادثات
-        chatMap['lastMessage'] = message.type == MessageType.image ? '📷 صورة' : message.body;
-        chatMap['lastMessageTime'] = message.timestamp;
-        chatMap['lastMessageSender'] = message.senderUser;
-        chatMap['updatedAt'] = message.timestamp;
+          chatMap['lastMessage'] = message.type == MessageType.image ? '📷 صورة' : message.body;
+          chatMap['lastMessageTime'] = message.timestamp;
+          chatMap['lastMessageSender'] = message.senderUser;
+          chatMap['updatedAt'] = message.timestamp;
 
-        if (chatMap['unreadCount'] == null) {
-          chatMap['unreadCount'] = <String, dynamic>{};
-        }
+          if (chatMap['unreadCount'] == null) {
+            chatMap['unreadCount'] = <String, dynamic>{};
+          }
 
-        final Map<String, dynamic> unreadMap = Map<String, dynamic>.from(chatMap['unreadCount']);
-        final int currentUnread = unreadMap[receiverCleanKey] ?? 0;
-        unreadMap[receiverCleanKey] = currentUnread + 1;
-        chatMap['unreadCount'] = unreadMap;
+          final Map<String, dynamic> unreadMap = Map<String, dynamic>.from(chatMap['unreadCount']);
+          final int currentUnread = unreadMap[receiverCleanKey] ?? 0;
+          unreadMap[receiverCleanKey] = currentUnread + 1;
+          chatMap['unreadCount'] = unreadMap;
 
-        return Transaction.success(chatMap);
-      });
+          return Transaction.success(chatMap);
+        }),
+        debugName: 'updateChat_${message.chatId}',
+        priority: false, // أولوية منخفضة للتحديث
+      );
 
-      // ✅ إصلاح نص الإشعار: لا ترسل رابط الصورة في الإشعار
       final notificationBody = message.type == MessageType.image ? '📷 صورة' : message.body;
 
-      // ✅ إرسال الإشعار
-      final List<ConnectivityResult> result = await Connectivity().checkConnectivity();
-      final isConnected = result.contains(ConnectivityResult.mobile) || result.contains(ConnectivityResult.wifi);
-
-      if (isConnected) {
+      // ✅ إرسال الإشعار (فقط إذا الاتصال جيد)
+      if (networkService.isConnected && !networkService.isSlowConnection) {
         final success = await NotificationService().sendMessageNotification(
           targetPhone: message.resevUser,
           senderName: message.senderUser,
-          messageBody: notificationBody, // ✅ استخدام النص المعدل
+          messageBody: notificationBody,
           chatId: message.chatId,
           messageId: messageId,
         );

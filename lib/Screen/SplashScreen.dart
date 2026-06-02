@@ -6,8 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../Provider/userProvide.dart';
+import '../model/user.dart';
+import '../service/NetworkOptimizationService.dart';
 import 'main_app_shell.dart';
-import 'login.dart';
+import 'loginScreen.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -86,55 +88,118 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   }
 
   Future<void> _initApp() async {
-    await Future.delayed(const Duration(seconds: 3));
+    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    print('🚀 بدء تهيئة التطبيق في SplashScreen');
+
+    // ✅ الانتظار لإظهار الـ Animation
+    await Future.delayed(const Duration(seconds: 2));
 
     if (!mounted) return;
 
     try {
+      // ✅ 1. قراءة البيانات المحلية أولاً
       final prefs = await SharedPreferences.getInstance();
       final isLoggedIn = prefs.getBool('isLogin') ?? false;
       final userPhone = prefs.getString('phone');
       final userId = prefs.getString('userId');
-      final isOnline = ref.read(internetConnectionProvider);
+      final userName = prefs.getString('userName');
+      final userEmail = prefs.getString('userEmail');
 
-      if (isLoggedIn && userPhone != null && userId != null) {
-        final authService = ref.read(authServiceProvider);
+      print('📱 البيانات المحلية:');
+      print('   - isLoggedIn: $isLoggedIn');
+      print('   - userPhone: $userPhone');
 
-        // ✅ إعداد Firebase Presence
-        // هذا سيقوم بـ:
-        // 1. تحديث الحالة إلى Online
-        // 2. تسجيل onDisconnect لتحويلها Offline تلقائياً عند انقطاع الاتصال
-        if (isOnline) {
-          authService.setupPresence(userId);
-        } else {
-          // إذا لم يكن متصلاً بالنت، تأكد من أنه Offline في Firebase
-          await authService.goOffline(userId);
-        }
+      if (!isLoggedIn || userPhone == null || userId == null) {
+        print('⚠️ المستخدم غير مسجل، الانتقال إلى LoginScreen');
+        _navigateToLogin();
+        return;
       }
 
-      if (mounted) {
-        if (isLoggedIn && userPhone != null && userPhone.isNotEmpty) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            RouteAnimation.slideFromRight(const MainAppShell()),
-                (route) => false,
-          );
-        } else {
-          Navigator.pushAndRemoveUntil(
-            context,
-            RouteAnimation.slideRightAndFade(const LoginScreen()),
-                (route) => false,
-          );
-        }
+      // ✅ 2. إنشاء كائن المستخدم من البيانات المحلية
+      final localUser = AppUser(
+        id: userId,
+        phone: userPhone,
+        email: userEmail,
+        displayName: userName ?? userPhone,
+        isOnline: false,
+      );
+
+      ref.read(appUserDataProvider.notifier).state = localUser;
+      ref.read(appUserPhoneProvider.notifier).state = userPhone;
+
+      print('✅ تم تحميل بيانات المستخدم من الذاكرة المحلية');
+
+      // ✅ 3. التحقق من حالة الاتصال
+      final networkService = NetworkOptimizationService();
+      final isOnline = networkService.isConnected;
+      final isSlowConnection = networkService.isSlowConnection;
+
+      print('🌐 حالة الاتصال: ${isOnline ? "متصل" : "غير متصل"}');
+      if (isSlowConnection) {
+        print('🐌 اتصال بطيء - تم تفعيل الوضع الموفر');
       }
-    } catch (e) {
+
+      // ✅ 4. إذا كان متصلاً، تحديث الحالة (مع Timeout)
+      if (isOnline) {
+        try {
+          print('🔄 تحديث حالة المستخدم...');
+          final authService = ref.read(authServiceProvider);
+
+          // ✅ استخدام NetworkOptimizationService للتحكم
+          await networkService.executeRequest(
+                () async => authService.setupPresence(userId),
+            debugName: 'setupPresence',
+            priority: true,
+          );
+
+          // ✅ جلب أحدث بيانات (فقط إذا الاتصال جيد)
+          if (!isSlowConnection) {
+            final freshUser = await networkService.executeRequest(
+                  () => authService.getUserByPhone(userPhone),
+              debugName: 'getUserByPhone',
+            );
+
+            if (freshUser != null && mounted) {
+              ref.read(appUserDataProvider.notifier).state =
+                  freshUser.copyWith(isOnline: true);
+              print('✅ تم تحديث بيانات المستخدم من Firebase');
+            }
+          }
+        } catch (e) {
+          print('⚠️ تعذر الاتصال بـ Firebase: $e');
+          print('✅ الاستمرار في الوضع Offline');
+        }
+      } else {
+        print('📴 الاستمرار في الوضع Offline');
+      }
+
+      // ✅ 5. الانتقال إلى الشاشة الرئيسية
       if (mounted) {
+        print('✅ الانتقال إلى MainAppShell');
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         Navigator.pushAndRemoveUntil(
           context,
-          RouteAnimation.slideRightAndFade(const LoginScreen()),
+          RouteAnimation.slideFromRight(const MainAppShell()),
               (route) => false,
         );
       }
+    } catch (e) {
+      print('❌ خطأ في تهيئة التطبيق: $e');
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+      if (mounted) {
+        _navigateToLogin();
+      }
+    }
+  }
+
+  void _navigateToLogin() {
+    if (mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        RouteAnimation.slideRightAndFade(const LoginScreen()),
+            (route) => false,
+      );
     }
   }
 
@@ -186,10 +251,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   height: 130,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white.withValues(alpha: 0.15),
+                    color: Colors.white.withOpacity(0.15),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
+                        color: Colors.black.withOpacity(0.1),
                         blurRadius: 30,
                         spreadRadius: 5,
                       ),
@@ -199,7 +264,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     margin: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white.withValues(alpha: 0.2),
+                      color: Colors.white.withOpacity(0.2),
                     ),
                     child: const Icon(
                       Icons.chat_rounded,
@@ -237,7 +302,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     width: _dotWidth.value,
                     height: 3,
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.6),
+                      color: Colors.white.withOpacity(0.6),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   );
@@ -254,7 +319,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     'تواصل بكل سهولة',
                     style: TextStyle(
                       fontSize: 16,
-                      color: Colors.white.withValues(alpha: 0.85),
+                      color: Colors.white.withOpacity(0.85),
                       fontWeight: FontWeight.w500,
                       letterSpacing: 1,
                     ),
@@ -271,7 +336,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   height: 24,
                   child: CircularProgressIndicator(
                     strokeWidth: 2.5,
-                    color: Colors.white.withValues(alpha: 0.7),
+                    color: Colors.white.withOpacity(0.7),
                   ),
                 ),
               ),
