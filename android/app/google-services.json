@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "643578428320",
+    "firebase_url": "https://swift-impulse-400708-default-rtdb.firebaseio.com",
+    "project_id": "swift-impulse-400708",
+    "storage_bucket": "swift-impulse-400708.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:643578428320:android:3de41f9cad85f55ee6c2c5",
+        "android_client_info": {
+          "package_name": "com.example.chat_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "643578428320-ifmd6o2acfv994jouapsspeqid50qr0q.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.chat_app",
+            "certificate_hash": "7df43ccd6d7e5888323d6348f182c6dc85369815"
+          }
+        },
+        {
+          "client_id": "643578428320-fkqd6t2dlannsrrt3tdqmpstc9bebgd6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCiLEIRhWNyaMWINjZ6Gvp2Flyv_NMsED8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "643578428320-fkqd6t2dlannsrrt3tdqmpstc9bebgd6.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "643578428320-f9tm2gg83jijvcuci9ogmhpg7s0kb170.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.chatApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
