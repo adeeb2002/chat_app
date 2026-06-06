@@ -15,12 +15,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../Notifications/CacheService.dart';
 import '../Provider/network_provider.dart';
-import '../Widgets/CustomSearchBar.dart';
 import '../model/chat.dart';
 import '../model/user.dart';
-import '../service/ImageUploadService.dart';
 import '../service/NetworkOptimizationService.dart';
 import '../theme/app_theme.dart';
+import '../widgets/CustomSearchBar.dart';
 import 'chatScreen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {

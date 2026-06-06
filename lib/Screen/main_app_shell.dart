@@ -1,4 +1,4 @@
-import 'package:ChatApp/Screen/instagram_screen.dart';
+import 'package:ChatApp/Screen/instagram/instagram_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -19,7 +19,7 @@ class _MainAppShellState extends ConsumerState<MainAppShell> {
   final List<Widget> _screens = const [
     HomeScreen(),
     StoriesScreen(),
-    InstagramScreen(),
+    Instagram(),
     SettingsScreen(),
   ];
 

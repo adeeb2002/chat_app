@@ -1,28 +1,32 @@
-
-
 import '../../model/instagram/instagram_media_model.dart';
 import '../../model/instagram/instagram_user_model.dart';
+
 import 'instagram_api_service.dart';
 import 'instagram_auth_service.dart';
 
 class InstagramRepository {
-  final InstagramAuthService _authService;
-  final InstagramApiService _apiService;
+  final InstagramAuthService _auth;
+  final InstagramApiService _api;
 
   InstagramRepository({
-    required InstagramAuthService authService,
-    required InstagramApiService apiService,
-  })  : _authService = authService,
-        _apiService = apiService;
+    required InstagramAuthService auth,
+    required InstagramApiService api,
+  })  : _auth = auth,
+        _api = api;
 
-  Future<String> signIn() => _authService.signIn();
-  Future<void> signOut() => _authService.signOut();
-  Future<String?> getStoredToken() => _authService.getStoredToken();
-  Future<bool> isTokenValid() => _authService.isTokenValid();
+  String buildAuthUrl() => _auth.buildAuthUrl();
+  bool isRedirectUrl(String url) => _auth.isRedirectUrl(url);
+  String? extractCode(String url) => _auth.extractCode(url);
+  String? extractError(String url) => _auth.extractError(url);
+  Future<bool> isLoggedIn() => _auth.isLoggedIn();
+  Future<void> logout() => _auth.logout();
+
+  Future<void> handleCode(String code) =>
+      _auth.exchangeCodeForToken(code);
 
   Future<InstagramUser> getUserProfile() async {
-    final token = await _getValidToken();
-    final user = await _apiService.getCurrentUser(token);
+    final token = await _getToken();
+    final user = await _api.getCurrentUser(token);
     return user.copyWith(accessToken: token);
   }
 
@@ -30,13 +34,22 @@ class InstagramRepository {
     String? cursor,
     int limit = 12,
   }) async {
-    final token = await _getValidToken();
-    return _apiService.getUserMedia(token, cursor: cursor, limit: limit);
+    final token = await _getToken();
+    return _api.getUserMedia(
+      token,
+      cursor: cursor,
+      limit: limit,
+    );
   }
 
-  Future<String> _getValidToken() async {
-    final token = await _authService.getStoredToken();
-    if (token == null) throw Exception('لم يتم تسجيل الدخول');
+  Future<List<InstagramMedia>> getUserStories() async {
+    final token = await _getToken();
+    return _api.getUserStories(token);
+  }
+
+  Future<String> _getToken() async {
+    final token = await _auth.getValidToken();
+    if (token == null) throw Exception('يجب تسجيل الدخول أولاً');
     return token;
   }
 }

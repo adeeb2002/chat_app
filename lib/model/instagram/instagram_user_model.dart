@@ -8,6 +8,7 @@ class InstagramUser {
   final int mediaCount;
   final String? profilePictureUrl;
   final String? website;
+  final String? accountType;
   final String? accessToken;
 
   const InstagramUser({
@@ -20,6 +21,7 @@ class InstagramUser {
     this.mediaCount = 0,
     this.profilePictureUrl,
     this.website,
+    this.accountType,
     this.accessToken,
   });
 
@@ -34,37 +36,32 @@ class InstagramUser {
       mediaCount: json['media_count'] ?? 0,
       profilePictureUrl: json['profile_picture_url'],
       website: json['website'],
+      accountType: json['account_type'],
     );
   }
 
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'username': username,
-    'name': name,
-    'biography': biography,
-    'followers_count': followersCount,
-    'follows_count': followsCount,
-    'media_count': mediaCount,
-    'profile_picture_url': profilePictureUrl,
-    'website': website,
-  };
-
-  InstagramUser copyWith({String? accessToken}) {
+  InstagramUser copyWith({
+    String? accessToken,
+    String? profilePictureUrl,
+    int? followersCount,
+    int? followsCount,
+    int? mediaCount,
+  }) {
     return InstagramUser(
       id: id,
       username: username,
       name: name,
       biography: biography,
-      followersCount: followersCount,
-      followsCount: followsCount,
-      mediaCount: mediaCount,
-      profilePictureUrl: profilePictureUrl,
+      followersCount: followersCount ?? this.followersCount,
+      followsCount: followsCount ?? this.followsCount,
+      mediaCount: mediaCount ?? this.mediaCount,
+      profilePictureUrl: profilePictureUrl ?? this.profilePictureUrl,
       website: website,
+      accountType: accountType,
       accessToken: accessToken ?? this.accessToken,
     );
   }
 
-  // Format numbers
   String get formattedFollowers => _formatCount(followersCount);
   String get formattedFollowing => _formatCount(followsCount);
   String get formattedPosts => _formatCount(mediaCount);

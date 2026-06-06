@@ -72,9 +72,16 @@ dependencies:
   connectivity_plus: ^6.0.0
   crypto: ^3.0.3
   internet_connection_checker_plus: ^3.0.0
+  webview_flutter: ^4.7.0
+  webview_flutter_android: ^3.16.0
+  webview_flutter_wkwebview: ^3.14.0
+  video_player: ^2.8.6
 
 
 
+  cookie_jar: ^4.0.8
+  dio_cookie_manager: ^3.4.0
+  uuid: ^4.1.0
 
 
 dev_dependencies:

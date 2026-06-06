@@ -1,3 +1,6 @@
+// lib/widgets/instagram/instagram_login_button.dart
+
+/*
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,7 +11,8 @@ class InstagramLoginButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final authState = ref.watch(instagramAuthProvider);
+    final authState = ref.watch(igApiServiceProvider);
+   // final notifier = ref.read(instagramAuthProvider.notifier);
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -59,8 +63,25 @@ class InstagramLoginButton extends ConsumerWidget {
         const SizedBox(height: 48),
 
         // Login Button
-        if (authState.isLoading)
+        if (authState.isChecking)
           const CircularProgressIndicator()
+        else if (authState.isLoggedIn)
+          Column(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.green, size: 48),
+              const SizedBox(height: 16),
+              const Text('تم تسجيل الدخول بنجاح'),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => notifier.logout(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('تسجيل الخروج'),
+              ),
+            ],
+          )
         else
           SizedBox(
             width: double.infinity,
@@ -79,9 +100,7 @@ class InstagramLoginButton extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(14),
               ),
               child: ElevatedButton.icon(
-                onPressed: () {
-                  ref.read(instagramAuthProvider.notifier).signIn();
-                },
+                onPressed: () => notifier.signIn(context),
                 icon: const Icon(Icons.login_rounded, color: Colors.white),
                 label: const Text(
                   'تسجيل الدخول بـ Instagram',
@@ -108,7 +127,7 @@ class InstagramLoginButton extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.1),
+              color: Colors.red.withAlpha(25),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
@@ -117,7 +136,7 @@ class InstagramLoginButton extends ConsumerWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    authState.errorMessage ?? 'حدث خطأ ما',
+                    authState.error ?? 'حدث خطأ ما',
                     style: const TextStyle(color: Colors.red, fontSize: 13),
                     textDirection: TextDirection.rtl,
                   ),
@@ -130,3 +149,5 @@ class InstagramLoginButton extends ConsumerWidget {
     );
   }
 }
+
+ */

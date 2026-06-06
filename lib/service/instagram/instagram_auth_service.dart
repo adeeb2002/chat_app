@@ -1,226 +1,234 @@
 import 'dart:convert';
-
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
-
 import '../../model/instagram/instagram_constants.dart';
-
 
 class InstagramAuthService {
   final Dio _dio;
-  final FlutterSecureStorage _secureStorage;
+  final FlutterSecureStorage _storage;
 
   InstagramAuthService({
     required Dio dio,
-    required FlutterSecureStorage secureStorage,
+    required FlutterSecureStorage storage,
   })  : _dio = dio,
-        _secureStorage = secureStorage;
+        _storage = storage;
 
-  // ========================
   // بناء رابط OAuth
-  // ========================
-  String _buildAuthUrl() {
+  String buildAuthUrl() {
     final params = {
       'client_id': InstagramConstants.clientId,
       'redirect_uri': InstagramConstants.redirectUri,
       'scope': InstagramConstants.scopes.join(','),
       'response_type': 'code',
     };
-
-    final queryString = params.entries
-        .map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+    final query = params.entries
+        .map((e) =>
+    '${Uri.encodeComponent(e.key)}'
+        '=${Uri.encodeComponent(e.value)}')
         .join('&');
-
-    return '${InstagramConstants.authBaseUrl}?$queryString';
+    return '${InstagramConstants.authBaseUrl}?$query';
   }
 
-  // ========================
-  // تسجيل الدخول
-  // ========================
-  Future<String> signIn() async {
+  // هل هذا رابط الـ callback?
+  bool isRedirectUrl(String url) {
+    return url.startsWith(InstagramConstants.redirectUri) ||
+        url.startsWith('https://localhost');
+  }
+
+  // استخراج الكود
+  String? extractCode(String url) {
     try {
-      // فتح متصفح OAuth
-      final result = await FlutterWebAuth2.authenticate(
-        url: _buildAuthUrl(),
-        callbackUrlScheme: 'myapp',
-        options: const FlutterWebAuth2Options(
-          preferEphemeral: true,
+      final uri = Uri.parse(url);
+      return uri.queryParameters['code'];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // استخراج الخطأ
+  String? extractError(String url) {
+    try {
+      final uri = Uri.parse(url);
+      return uri.queryParameters['error_description'] ??
+          uri.queryParameters['error'];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // تبديل الكود بـ Token
+  Future<void> exchangeCodeForToken(String code) async {
+    try {
+      final response = await _dio.post(
+        InstagramConstants.tokenUrl,
+        data: {
+          'client_id': InstagramConstants.clientId,
+          'client_secret': InstagramConstants.clientSecret,
+          'grant_type': 'authorization_code',
+          'redirect_uri': InstagramConstants.redirectUri,
+          'code': code,
+        },
+        options: Options(
+          contentType: Headers.formUrlEncodedContentType,
+          validateStatus: (s) => s != null && s < 500,
         ),
       );
 
-      // استخراج الكود من الرابط
-      final uri = Uri.parse(result);
-      final code = uri.queryParameters['code'];
-
-      if (code == null) {
-        throw Exception('لم يتم الحصول على authorization code');
+      if (response.statusCode != 200) {
+        final err = _parse(response.data);
+        throw Exception(
+          err['error_message'] ??
+              err['message'] ??
+              'فشل الحصول على رمز الوصول',
+        );
       }
 
-      // تحويل الكود إلى Access Token
-      final shortLivedToken = await _exchangeCodeForToken(code);
+      final data = _parse(response.data);
+      final shortToken = data['access_token']?.toString();
+      final userId = data['user_id']?.toString();
 
-      // تحويل Short-lived Token إلى Long-lived Token
-      final longLivedToken = await _exchangeForLongLivedToken(shortLivedToken);
+      if (shortToken == null || shortToken.isEmpty) {
+        throw Exception('رمز الوصول غير موجود');
+      }
 
-      // حفظ التوكن بأمان
-      await _saveToken(longLivedToken);
+      if (userId != null) {
+        await _storage.write(
+          key: InstagramConstants.userIdKey,
+          value: userId,
+        );
+      }
 
-      return longLivedToken;
-    } catch (e) {
-      throw _handleAuthError(e);
+      await _toLongLivedToken(shortToken);
+    } on DioException catch (e) {
+      final data = _parse(e.response?.data);
+      throw Exception(
+        data['error_message'] ??
+            data['message'] ??
+            'خطأ في الشبكة',
+      );
     }
   }
 
-  // ========================
-  // تبديل الكود بتوكن
-  // ========================
-  Future<String> _exchangeCodeForToken(String code) async {
-    final response = await _dio.post(
-      InstagramConstants.tokenUrl,
-      data: {
-        'client_id': InstagramConstants.clientId,
-        'client_secret': InstagramConstants.clientSecret,
-        'grant_type': 'authorization_code',
-        'redirect_uri': InstagramConstants.redirectUri,
-        'code': code,
-      },
-      options: Options(
-        contentType: Headers.formUrlEncodedContentType,
-      ),
-    );
-
-    if (response.data == null) {
-      throw Exception('فشل في الحصول على التوكن');
-    }
-
-    final data = response.data is String
-        ? jsonDecode(response.data)
-        : response.data;
-
-    return data['access_token'] as String;
-  }
-
-  // ========================
-  // تحويل إلى Long-lived Token (60 يوم)
-  // ========================
-  Future<String> _exchangeForLongLivedToken(String shortLivedToken) async {
+  // تحويل إلى Long-lived Token
+  Future<void> _toLongLivedToken(String shortToken) async {
     final response = await _dio.get(
       InstagramConstants.longLivedTokenUrl,
       queryParameters: {
         'grant_type': 'ig_exchange_token',
         'client_secret': InstagramConstants.clientSecret,
-        'access_token': shortLivedToken,
+        'access_token': shortToken,
       },
     );
 
-    final data = response.data is String
-        ? jsonDecode(response.data)
-        : response.data;
+    final data = _parse(response.data);
+    final token = data['access_token']?.toString();
+    if (token == null) throw Exception('فشل تحويل التوكن');
 
-    final token = data['access_token'] as String;
-    final expiresIn = data['expires_in'] as int? ?? 5183944;
+    final expiresIn =
+        (data['expires_in'] as num?)?.toInt() ?? 5183944;
+    final expiry =
+    DateTime.now().add(Duration(seconds: expiresIn));
 
-    // حفظ تاريخ انتهاء الصلاحية
-    final expiryDate = DateTime.now().add(Duration(seconds: expiresIn));
-    await _secureStorage.write(
-      key: InstagramConstants.tokenExpiryKey,
-      value: expiryDate.toIso8601String(),
+    await Future.wait([
+      _storage.write(
+        key: InstagramConstants.accessTokenKey,
+        value: token,
+      ),
+      _storage.write(
+        key: InstagramConstants.tokenExpiryKey,
+        value: expiry.toIso8601String(),
+      ),
+    ]);
+  }
+
+  Future<String?> getValidToken() async {
+    final token = await _storage.read(
+      key: InstagramConstants.accessTokenKey,
     );
+    if (token == null || token.isEmpty) return null;
 
+    final expiryStr = await _storage.read(
+      key: InstagramConstants.tokenExpiryKey,
+    );
+    if (expiryStr != null) {
+      final expiry = DateTime.tryParse(expiryStr);
+      if (expiry != null) {
+        if (DateTime.now().isAfter(expiry)) {
+          await logout();
+          return null;
+        }
+        if (expiry.difference(DateTime.now()).inDays < 7) {
+          return await _refresh(token);
+        }
+      }
+    }
     return token;
   }
 
-  // ========================
-  // تجديد التوكن تلقائياً
-  // ========================
-  Future<String?> refreshToken() async {
-    final currentToken = await getStoredToken();
-    if (currentToken == null) return null;
-
+  Future<String?> _refresh(String token) async {
     try {
       final response = await _dio.get(
-        'https://graph.instagram.com/refresh_access_token',
+        '${InstagramConstants.graphBaseUrl}/refresh_access_token',
         queryParameters: {
           'grant_type': 'ig_refresh_token',
-          'access_token': currentToken,
+          'access_token': token,
         },
       );
+      final data = _parse(response.data);
+      final newToken = data['access_token']?.toString();
+      if (newToken == null) return token;
 
-      final data = response.data is String
-          ? jsonDecode(response.data)
-          : response.data;
-
-      final newToken = data['access_token'] as String;
-      await _saveToken(newToken);
+      final expiresIn =
+          (data['expires_in'] as num?)?.toInt() ?? 5183944;
+      final expiry =
+      DateTime.now().add(Duration(seconds: expiresIn));
+      await Future.wait([
+        _storage.write(
+          key: InstagramConstants.accessTokenKey,
+          value: newToken,
+        ),
+        _storage.write(
+          key: InstagramConstants.tokenExpiryKey,
+          value: expiry.toIso8601String(),
+        ),
+      ]);
       return newToken;
-    } catch (e) {
-      return null;
+    } catch (_) {
+      return token;
     }
   }
 
-  // ========================
-  // حفظ التوكن
-  // ========================
-  Future<void> _saveToken(String token) async {
-    await _secureStorage.write(
+  Future<bool> isLoggedIn() async {
+    final token = await _storage.read(
       key: InstagramConstants.accessTokenKey,
-      value: token,
     );
-  }
+    if (token == null || token.isEmpty) return false;
 
-  // ========================
-  // قراءة التوكن المحفوظ
-  // ========================
-  Future<String?> getStoredToken() async {
-    return await _secureStorage.read(key: InstagramConstants.accessTokenKey);
-  }
-
-  // ========================
-  // التحقق من صلاحية التوكن
-  // ========================
-  Future<bool> isTokenValid() async {
-    final token = await getStoredToken();
-    if (token == null) return false;
-
-    final expiryString = await _secureStorage.read(
+    final expiryStr = await _storage.read(
       key: InstagramConstants.tokenExpiryKey,
     );
-
-    if (expiryString == null) return true;
-
-    final expiry = DateTime.tryParse(expiryString);
+    if (expiryStr == null) return true;
+    final expiry = DateTime.tryParse(expiryStr);
     if (expiry == null) return true;
-
-    // تجديد إذا كان سينتهي خلال 7 أيام
-    if (expiry.difference(DateTime.now()).inDays < 7) {
-      await refreshToken();
-    }
-
     return DateTime.now().isBefore(expiry);
   }
 
-  // ========================
-  // تسجيل الخروج
-  // ========================
-  Future<void> signOut() async {
-    await _secureStorage.delete(key: InstagramConstants.accessTokenKey);
-    await _secureStorage.delete(key: InstagramConstants.userIdKey);
-    await _secureStorage.delete(key: InstagramConstants.tokenExpiryKey);
+  Future<void> logout() async {
+    await Future.wait([
+      _storage.delete(key: InstagramConstants.accessTokenKey),
+      _storage.delete(key: InstagramConstants.userIdKey),
+      _storage.delete(key: InstagramConstants.tokenExpiryKey),
+    ]);
   }
 
-  // ========================
-  // معالجة الأخطاء
-  // ========================
-  Exception _handleAuthError(dynamic error) {
-    if (error is DioException) {
-      switch (error.response?.statusCode) {
-        case 400: return Exception('طلب غير صحيح');
-        case 401: return Exception('غير مصرح له');
-        case 403: return Exception('تم رفض الوصول');
-        default: return Exception('خطأ في الشبكة: ${error.message}');
-      }
+  Map<String, dynamic> _parse(dynamic data) {
+    if (data is Map<String, dynamic>) return data;
+    if (data is String) {
+      try {
+        final d = jsonDecode(data);
+        if (d is Map<String, dynamic>) return d;
+      } catch (_) {}
     }
-    return Exception(error.toString());
+    return {};
   }
 }

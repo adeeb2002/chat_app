@@ -29,6 +29,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.chat_app"
+
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -49,4 +50,5 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    implementation("androidx.browser:browser:1.7.0")
 }

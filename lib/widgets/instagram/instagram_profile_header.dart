@@ -1,7 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+
 import '../../model/instagram/instagram_user_model.dart';
-import 'shimmer_widgets.dart';
 
 class InstagramProfileHeader extends StatelessWidget {
   final InstagramUser user;
@@ -10,14 +10,13 @@ class InstagramProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Container(
+    return Padding(
       padding: const EdgeInsets.all(20),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Profile Picture
+          // Avatar
           Stack(
             alignment: Alignment.bottomRight,
             children: [
@@ -38,31 +37,21 @@ class InstagramProfileHeader extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(3),
                   decoration: BoxDecoration(
-                    color: theme.scaffoldBackgroundColor,
+                    color: isDark ? const Color(0xFF121212) : Colors.white,
                     shape: BoxShape.circle,
                   ),
                   child: CircleAvatar(
-                    radius: 50,
+                    radius: 52,
                     backgroundColor: Colors.grey[200],
                     backgroundImage: user.profilePictureUrl != null
-                        ? CachedNetworkImageProvider(user.profilePictureUrl!)
+                        ? CachedNetworkImageProvider(
+                        user.profilePictureUrl!)
                         : null,
                     child: user.profilePictureUrl == null
-                        ? const Icon(Icons.person, size: 50, color: Colors.grey)
+                        ? const Icon(Icons.person,
+                        size: 52, color: Colors.grey)
                         : null,
                   ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.all(4),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF0095F6),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.check,
-                  color: Colors.white,
-                  size: 14,
                 ),
               ),
             ],
@@ -73,39 +62,42 @@ class InstagramProfileHeader extends StatelessWidget {
           // Username
           Text(
             '@${user.username}',
-            style: theme.textTheme.titleLarge?.copyWith(
+            style: const TextStyle(
+              fontSize: 22,
               fontWeight: FontWeight.bold,
             ),
           ),
 
-          if (user.name != null) ...[
+          if (user.name?.isNotEmpty == true) ...[
             const SizedBox(height: 4),
             Text(
               user.name!,
-              style: theme.textTheme.bodyMedium?.copyWith(
+              style: TextStyle(
                 color: Colors.grey[600],
+                fontSize: 14,
               ),
             ),
           ],
 
-          if (user.biography != null && user.biography!.isNotEmpty) ...[
+          if (user.biography?.isNotEmpty == true) ...[
             const SizedBox(height: 12),
             Text(
               user.biography!,
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-              maxLines: 3,
+              style: const TextStyle(fontSize: 14, height: 1.5),
+              maxLines: 4,
               overflow: TextOverflow.ellipsis,
               textDirection: TextDirection.rtl,
             ),
           ],
 
-          if (user.website != null && user.website!.isNotEmpty) ...[
+          if (user.website?.isNotEmpty == true) ...[
             const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.link, size: 16, color: Color(0xFF0095F6)),
+                const Icon(Icons.link_rounded,
+                    size: 16, color: Color(0xFF0095F6)),
                 const SizedBox(width: 4),
                 Text(
                   user.website!,
@@ -119,37 +111,40 @@ class InstagramProfileHeader extends StatelessWidget {
             ),
           ],
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
 
-          // Stats Row
+          // Stats
           Container(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            padding:
+            const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
             decoration: BoxDecoration(
-              color: theme.brightness == Brightness.dark
-                  ? const Color(0xFF1F2C33)
-                  : Colors.grey[50],
+              color:
+              isDark ? const Color(0xFF1F2C33) : Colors.grey[50],
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: Colors.grey.withValues(alpha: 0.1),
+                color: Colors.grey.withValues(alpha: 0.15),
               ),
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 _StatItem(
-                  count: user.formattedPosts,
-                  label: 'المنشورات',
-                ),
-                _Divider(),
+                    value: user.formattedPosts,
+                    label: 'منشور'),
+                Container(
+                    width: 1,
+                    height: 36,
+                    color: Colors.grey.withValues(alpha: 0.3)),
                 _StatItem(
-                  count: user.formattedFollowers,
-                  label: 'المتابعون',
-                ),
-                _Divider(),
+                    value: user.formattedFollowers,
+                    label: 'متابع'),
+                Container(
+                    width: 1,
+                    height: 36,
+                    color: Colors.grey.withValues(alpha: 0.3)),
                 _StatItem(
-                  count: user.formattedFollowing,
-                  label: 'يتابع',
-                ),
+                    value: user.formattedFollowing,
+                    label: 'يتابع'),
               ],
             ),
           ),
@@ -160,23 +155,23 @@ class InstagramProfileHeader extends StatelessWidget {
 }
 
 class _StatItem extends StatelessWidget {
-  final String count;
+  final String value;
   final String label;
 
-  const _StatItem({required this.count, required this.label});
+  const _StatItem({required this.value, required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         Text(
-          count,
+          value,
           style: const TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         Text(
           label,
           style: TextStyle(
@@ -185,17 +180,6 @@ class _StatItem extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _Divider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 40,
-      width: 1,
-      color: Colors.grey.withValues(alpha: 0.3),
     );
   }
 }
