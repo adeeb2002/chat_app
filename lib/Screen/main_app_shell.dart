@@ -1,4 +1,4 @@
-import 'package:ChatApp/Screen/instagram/instagram_screen.dart';
+import 'package:ChatApp/Screen/youtube/youtube_home_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -19,7 +19,7 @@ class _MainAppShellState extends ConsumerState<MainAppShell> {
   final List<Widget> _screens = const [
     HomeScreen(),
     StoriesScreen(),
-    Instagram(),
+    YoutubeHomeScreen(),
     SettingsScreen(),
   ];
 
@@ -75,9 +75,9 @@ class _MainAppShellState extends ConsumerState<MainAppShell> {
                     isDark: isDark,
                   ),
                   _NavItem(
-                    icon: Icons.forward_to_inbox_sharp,
-                    activeIcon: Icons.forward_to_inbox,
-                    label: 'الانستقرام',
+                    icon: Icons.ondemand_video_outlined,
+                    activeIcon: Icons.slow_motion_video_sharp,
+                    label: 'اليوتيوب',
                     isSelected: _selectedIndex == 2,
                     onTap: () => setState(() => _selectedIndex = 2),
                     isDark: isDark,

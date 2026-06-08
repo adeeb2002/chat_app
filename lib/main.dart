@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:ChatApp/Screen/SplashScreen.dart';
 import 'package:ChatApp/hiveModle/HiveMessage.dart';
@@ -43,6 +44,7 @@ void main() async {
   } catch (e) {
     print('❌ خطأ في تهيئة Hive: $e');
   }
+
 
   // ✅ 2. تهيئة خدمة تحسين الشبكة (قبل Firebase)
   try {
@@ -101,6 +103,12 @@ void main() async {
 
   print('✅ تم تهيئة التطبيق بنجاح');
   print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
 
   runApp(const ProviderScope(child: MyApp()));
 }
